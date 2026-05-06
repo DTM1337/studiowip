@@ -44,13 +44,13 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   const fileInputRef                    = useRef<HTMLInputElement>(null)
   const dragCounter                     = useRef(0)
 
-  // Pan & zoom state
-  const [zoom, setZoom]       = useState(1)
-  const [pan, setPan]         = useState({ x: 0, y: 0 })
-  const isPanning             = useRef(false)
-  const panStart              = useRef({ x: 0, y: 0 })
-  const panOrigin             = useRef({ x: 0, y: 0 })
-  const stageRef              = useRef<HTMLDivElement>(null)
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan]   = useState({ x: 0, y: 0 })
+  const isPanning       = useRef(false)
+  const panMoved        = useRef(false)
+  const panStart        = useRef({ x: 0, y: 0 })
+  const panOrigin       = useRef({ x: 0, y: 0 })
+  const stageRef        = useRef<HTMLDivElement>(null)
 
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(() => {
     if (typeof window === 'undefined') return {}
@@ -65,7 +65,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(positions)) }, [positions])
   useEffect(() => { localStorage.setItem(SIZES_KEY,   JSON.stringify(sizes))     }, [sizes])
 
-  // Realtime
   useEffect(() => {
     const channel = supabase
       .channel('wall-feed')
@@ -77,7 +76,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // Upload
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
     const list = Array.from(files)
     if (!list.length) return
@@ -97,7 +95,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     setUploading(false)
   }, [uploadName, caption])
 
-  // File drag
   useEffect(() => {
     const onDragEnter = (e: DragEvent) => {
       if (!e.dataTransfer?.types.includes('Files')) return
@@ -109,8 +106,8 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
       dragCounter.current--
       if (dragCounter.current <= 0) { dragCounter.current = 0; setIsFileDrag(false) }
     }
-    const onDragOver  = (e: DragEvent) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault() }
-    const onDrop      = (e: DragEvent) => {
+    const onDragOver = (e: DragEvent) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault() }
+    const onDrop = (e: DragEvent) => {
       e.preventDefault()
       dragCounter.current = 0
       setIsFileDrag(false)
@@ -128,7 +125,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     }
   }, [uploadFiles])
 
-  // Zoom on wheel
   useEffect(() => {
     const el = stageRef.current
     if (!el) return
@@ -141,24 +137,34 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  // Pan on middle-mouse or space+drag
   const onStageMouseDown = (e: React.MouseEvent) => {
-  const target = e.target as HTMLElement
-  const isCard = target.closest('.wall-card')
-  if (e.button === 1 || (!isCard && e.button === 0)) {
-    isPanning.current = true
-    panStart.current  = { x: e.clientX, y: e.clientY }
-    panOrigin.current = { ...pan }
-    e.preventDefault()
+    const target = e.target as HTMLElement
+    const isCard = target.closest('.wall-card')
+    if (e.button === 1 || (!isCard && e.button === 0)) {
+      isPanning.current = true
+      panMoved.current  = false
+      panStart.current  = { x: e.clientX, y: e.clientY }
+      panOrigin.current = { ...pan }
+      e.preventDefault()
+    }
   }
-}
+
   const onStageMouseMove = (e: React.MouseEvent) => {
     if (!isPanning.current) return
-    const dx = (e.clientX - panStart.current.x) / zoom
-    const dy = (e.clientY - panStart.current.y) / zoom
-    setPan({ x: panOrigin.current.x + dx, y: panOrigin.current.y + dy })
+    const dx = e.clientX - panStart.current.x
+    const dy = e.clientY - panStart.current.y
+    if (Math.hypot(dx, dy) > 4) panMoved.current = true
+    if (!panMoved.current) return
+    setPan({
+      x: panOrigin.current.x + dx / zoom,
+      y: panOrigin.current.y + dy / zoom,
+    })
   }
-  const onStageMouseUp = () => { isPanning.current = false }
+
+  const onStageMouseUp = () => {
+    isPanning.current = false
+    panMoved.current  = false
+  }
 
   const handleDelete = async (post: Post) => {
     await fetch(`/api/posts/${post.id}`, { method: 'DELETE' })
@@ -168,7 +174,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
 
   return (
     <div className="wall-root">
-      {/* TOP BAR */}
       <header className="topbar">
         <div className="topbar-left">
           <span className="zoom-hint">Scroll för att zooma · Dra bakgrunden för att panorera</span>
@@ -203,7 +208,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
             style={{ display: 'none' }}
             onChange={(e) => { if (e.target.files) uploadFiles(e.target.files); e.target.value = '' }}
           />
-          {/* Zoom controls */}
           <div className="zoom-controls">
             <button onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.2))}>＋</button>
             <span>{Math.round(zoom * 100)}%</span>
@@ -213,7 +217,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         </div>
       </header>
 
-      {/* STAGE */}
       <div
         ref={stageRef}
         className="wall-stage"
@@ -257,7 +260,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         </div>
       </div>
 
-      {/* FILE DRAG OVERLAY */}
       {isFileDrag && (
         <div className="drop-overlay">
           <div className="drop-box">
@@ -268,7 +270,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         </div>
       )}
 
-      {/* LIGHTBOX */}
       {selectedPost && (
         <div className="lightbox" onClick={() => setSelectedPost(null)}>
           <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
@@ -332,28 +333,18 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         }
         .zoom-controls button:hover { background: #f0f0f0; }
         .zoom-controls span { font-size: 11px; color: #888; min-width: 36px; text-align: center; }
-
         .wall-stage {
-          flex: 1;
-          margin-top: 53px;
-          overflow: hidden;
-          width: 100vw;
-          height: calc(100vh - 53px);
+          flex: 1; margin-top: 53px; overflow: hidden;
+          width: 100vw; height: calc(100vh - 53px);
           cursor: grab;
           display: flex; align-items: center; justify-content: center;
         }
         .wall-stage:active { cursor: grabbing; }
-        .wall-canvas {
-          position: relative;
-          width: 1400px; height: 1200px;
-          flex-shrink: 0;
-        }
-
+        .wall-canvas { position: relative; width: 1400px; height: 1200px; flex-shrink: 0; }
         .drop-overlay {
           position: fixed; inset: 0; z-index: 200;
           display: flex; align-items: center; justify-content: center;
-          background: rgba(0,0,0,.55); backdrop-filter: blur(8px);
-          pointer-events: none;
+          background: rgba(0,0,0,.55); backdrop-filter: blur(8px); pointer-events: none;
         }
         .drop-box {
           background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
@@ -362,7 +353,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         .drop-icon { font-size: 48px; margin-bottom: 16px; }
         .drop-box h2 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
         .drop-box p  { font-size: 14px; opacity: .6; }
-
         .lightbox {
           position: fixed; inset: 0; z-index: 300;
           display: flex; align-items: center; justify-content: center;
@@ -386,9 +376,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         }
         .lb-delete:hover { opacity: .82; }
         .lb-media { background: #000; }
-        .lb-media img, .lb-media video {
-          display: block; width: 100%; max-height: 80vh; object-fit: contain;
-        }
+        .lb-media img, .lb-media video { display: block; width: 100%; max-height: 80vh; object-fit: contain; }
         .lb-footer {
           padding: 16px 20px; display: flex; gap: 10px; align-items: baseline;
           border-top: 1px solid rgba(0,0,0,.08);
@@ -411,10 +399,10 @@ interface CardProps {
 }
 
 function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick }: CardProps) {
-  const dragDist   = useRef(0)
-  const resizing   = useRef(false)
-  const startX     = useRef(0)
-  const startW     = useRef(0)
+  const dragDist    = useRef(0)
+  const resizing    = useRef(false)
+  const startX      = useRef(0)
+  const startW      = useRef(0)
   const aspectClass = post.file_type === 'video' ? 'aspect-video' : 'aspect-[4/5]'
 
   const onResizeMouseDown = (e: React.MouseEvent) => {

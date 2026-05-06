@@ -21,7 +21,7 @@ function basePosition(id: string): { x: number; y: number } {
 }
 
 function baseRotation(id: string): number {
-  return seededRand(id + 'r') * 11
+  return 0
 }
 
 function aspectW(type: string): number {

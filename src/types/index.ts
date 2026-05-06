@@ -5,4 +5,7 @@ export interface Post {
   file_type: 'image' | 'video'
   uploader_name: string
   caption: string | null
+  pos_x: number
+  pos_y: number
+  card_size: number
 }

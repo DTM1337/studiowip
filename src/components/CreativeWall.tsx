@@ -20,7 +20,7 @@ function basePosition(id: string): { x: number; y: number } {
   return { x: a * 680, y: b * 480 }
 }
 
-function baseRotation(id: string): number {
+function baseRotation(): number {
   return 0
 }
 
@@ -29,6 +29,7 @@ function aspectW(type: string): number {
 }
 
 const STORAGE_KEY = 'showandtell-positions'
+const SIZES_KEY = 'showandtell-sizes'
 
 interface Props {
   initialPosts: Post[]
@@ -50,9 +51,18 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') } catch { return {} }
   })
 
+  const [sizes, setSizes] = useState<Record<string, number>>(() => {
+    if (typeof window === 'undefined') return {}
+    try { return JSON.parse(localStorage.getItem(SIZES_KEY) ?? '{}') } catch { return {} }
+  })
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(positions))
   }, [positions])
+
+  useEffect(() => {
+    localStorage.setItem(SIZES_KEY, JSON.stringify(sizes))
+  }, [sizes])
 
   useEffect(() => {
     const channel = supabase
@@ -163,8 +173,8 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
             const base  = basePosition(post.id)
             const initX = saved?.x ?? base.x
             const initY = saved?.y ?? base.y
-            const rot   = baseRotation(post.id)
-            const w     = aspectW(post.file_type)
+            const rot   = baseRotation()
+            const w     = sizes[post.id] ?? aspectW(post.file_type)
 
             return (
               <DraggableCard
@@ -179,6 +189,9 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
                     ...prev,
                     [post.id]: { x: (prev[post.id]?.x ?? base.x) + dx, y: (prev[post.id]?.y ?? base.y) + dy },
                   }))
+                }
+                onResized={(newW) =>
+                  setSizes((prev) => ({ ...prev, [post.id]: newW }))
                 }
                 onClick={() => setSelectedPost(post)}
               />
@@ -228,8 +241,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
           border-bottom: 1px solid rgba(0,0,0,.07);
         }
         .topbar-left { display: flex; flex-direction: column; gap: 1px; }
-        .topbar-logo { font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: #111; }
-        .topbar-sub  { font-size: 11px; color: #aaa; }
         .topbar-right { display: flex; align-items: center; gap: 8px; }
         .field {
           background: #fff;
@@ -321,12 +332,38 @@ interface CardProps {
   rotation: number
   width: number
   onMoved: (dx: number, dy: number) => void
+  onResized: (newW: number) => void
   onClick: () => void
 }
 
-function DraggableCard({ post, initX, initY, rotation, width, onMoved, onClick }: CardProps) {
+function DraggableCard({ post, initX, initY, rotation, width, onMoved, onResized, onClick }: CardProps) {
   const dragDist = useRef(0)
   const aspectClass = post.file_type === 'video' ? 'aspect-video' : 'aspect-[4/5]'
+  const resizing = useRef(false)
+  const startX = useRef(0)
+  const startW = useRef(0)
+
+  const onResizeMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    resizing.current = true
+    startX.current = e.clientX
+    startW.current = width
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!resizing.current) return
+      const delta = ev.clientX - startX.current
+      const newW = Math.max(120, Math.min(600, startW.current + delta))
+      onResized(newW)
+    }
+    const onMouseUp = () => {
+      resizing.current = false
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }
 
   return (
     <motion.article
@@ -366,11 +403,13 @@ function DraggableCard({ post, initX, initY, rotation, width, onMoved, onClick }
         </div>
       </div>
 
+      <div className="resize-handle" onMouseDown={onResizeMouseDown} />
+
       <style>{`
         .wall-card {
           cursor: grab;
           border-radius: 22px;
-          overflow: hidden;
+          overflow: visible;
           background: #fff;
           border: 1px solid rgba(0,0,0,.08);
           box-shadow: 0 4px 20px rgba(0,0,0,.13), 0 1px 4px rgba(0,0,0,.06);
@@ -386,6 +425,7 @@ function DraggableCard({ post, initX, initY, rotation, width, onMoved, onClick }
           position: relative;
           overflow: hidden;
           width: 100%;
+          border-radius: 22px;
         }
         .card-media img, .card-media video {
           width: 100%; height: 100%;
@@ -404,10 +444,26 @@ function DraggableCard({ post, initX, initY, rotation, width, onMoved, onClick }
           opacity: 0;
           transition: opacity .25s ease, transform .25s ease;
           transform: translateY(6px);
+          border-radius: 22px;
         }
         .wall-card:hover .card-hover-overlay { opacity: 1; transform: translateY(0); }
         .card-user    { font-size: 12px; font-weight: 700; color: #fff; }
         .card-caption { font-size: 11px; color: rgba(255,255,255,.75); margin-top: 2px; }
+        .resize-handle {
+          position: absolute;
+          bottom: -6px;
+          right: -6px;
+          width: 18px;
+          height: 18px;
+          background: #fff;
+          border: 2px solid rgba(0,0,0,.2);
+          border-radius: 50%;
+          cursor: se-resize;
+          opacity: 0;
+          transition: opacity .2s;
+          z-index: 10;
+        }
+        .wall-card:hover .resize-handle { opacity: 1; }
       `}</style>
     </motion.article>
   )

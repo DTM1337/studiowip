@@ -119,10 +119,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   return (
     <div className="wall-root">
       <header className="topbar">
-        <div className="topbar-left">
-          <span className="topbar-logo">Show &amp; Tell</span>
-          <span className="topbar-sub">Vad jobbar du med?</span>
-        </div>
+        <div className="topbar-left"></div>
         <div className="topbar-right">
           <input
             className="field nm"

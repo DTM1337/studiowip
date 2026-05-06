@@ -94,24 +94,50 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  const uploadFiles = useCallback(async (files: FileList | File[]) => {
-    const list = Array.from(files)
-    if (!list.length) return
-    setUploading(true)
-    for (const file of list) {
-      const fd = new FormData()
-      fd.append('file', file)
-      fd.append('uploaderName', uploadName.trim() || 'Anonymous')
-      if (caption.trim()) fd.append('caption', caption.trim())
-      const res = await fetch('/api/upload', { method: 'POST', body: fd })
-      if (!res.ok) {
-        const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
-        alert(`Upload failed: ${error}`)
-      }
+ const uploadFiles = useCallback(async (files: FileList | File[]) => {
+  const list = Array.from(files)
+  if (!list.length) return
+  setUploading(true)
+
+  for (const file of list) {
+    const allowed = ['image/jpeg','image/png','image/gif','image/webp','video/mp4','video/quicktime']
+    if (!allowed.includes(file.type)) { alert(`Filtyp stöds ej: ${file.type}`); continue }
+    if (file.size > 50 * 1024 * 1024) { alert('Max 50MB per fil'); continue }
+
+    const ext      = file.name.split('.').pop() ?? 'bin'
+    const fileName = `${crypto.randomUUID()}.${ext}`
+    const fileType = file.type.startsWith('video/') ? 'video' : 'image'
+
+    // Upload directly to Supabase Storage from the browser
+    const { error: storageError } = await supabase.storage
+      .from('media')
+      .upload(fileName, file, { contentType: file.type, upsert: false })
+
+    if (storageError) { alert(`Storage error: ${storageError.message}`); continue }
+
+    const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName)
+
+    // Save metadata to DB via API
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file_url: publicUrl,
+        file_type: fileType,
+        uploader_name: uploadName.trim() || 'Anonymous',
+        caption: caption.trim() || null,
+      }),
+    })
+
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
+      alert(`DB error: ${error}`)
     }
-    setCaption('')
-    setUploading(false)
-  }, [uploadName, caption])
+  }
+
+  setCaption('')
+  setUploading(false)
+}, [uploadName, caption])
 
   useEffect(() => {
     const onDragEnter = (e: DragEvent) => {

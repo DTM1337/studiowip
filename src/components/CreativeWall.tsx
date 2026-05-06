@@ -24,10 +24,16 @@ function aspectW(type: string): number {
   return type === 'video' ? 320 : 230
 }
 
-const STORAGE_KEY = 'showandtell-positions'
-const SIZES_KEY   = 'showandtell-sizes'
-const MIN_ZOOM    = 0.2
-const MAX_ZOOM    = 3
+function debounce<T extends (...args: Parameters<T>) => void>(fn: T, ms: number) {
+  let timer: ReturnType<typeof setTimeout>
+  return (...args: Parameters<T>) => {
+    clearTimeout(timer)
+    timer = setTimeout(() => fn(...args), ms)
+  }
+}
+
+const MIN_ZOOM = 0.2
+const MAX_ZOOM = 3
 
 interface Props {
   initialPosts: Post[]
@@ -52,18 +58,30 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   const panOrigin       = useRef({ x: 0, y: 0 })
   const stageRef        = useRef<HTMLDivElement>(null)
 
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(() => {
-    if (typeof window === 'undefined') return {}
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') } catch { return {} }
-  })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const savePosition = useCallback(
+    debounce((id: string, pos_x: number, pos_y: number) => {
+      console.log('savePosition', id, pos_x, pos_y)
+      fetch(`/api/posts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pos_x, pos_y }),
+      })
+    }, 600),
+    []
+  )
 
-  const [sizes, setSizes] = useState<Record<string, number>>(() => {
-    if (typeof window === 'undefined') return {}
-    try { return JSON.parse(localStorage.getItem(SIZES_KEY) ?? '{}') } catch { return {} }
-  })
-
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(positions)) }, [positions])
-  useEffect(() => { localStorage.setItem(SIZES_KEY,   JSON.stringify(sizes))     }, [sizes])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const saveSize = useCallback(
+    debounce((id: string, card_size: number) => {
+      fetch(`/api/posts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ card_size }),
+      })
+    }, 600),
+    []
+  )
 
   useEffect(() => {
     const channel = supabase
@@ -155,21 +173,29 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     const dy = e.clientY - panStart.current.y
     if (Math.hypot(dx, dy) > 4) panMoved.current = true
     if (!panMoved.current) return
-    setPan({
-      x: panOrigin.current.x + dx / zoom,
-      y: panOrigin.current.y + dy / zoom,
-    })
+    setPan({ x: panOrigin.current.x + dx / zoom, y: panOrigin.current.y + dy / zoom })
   }
 
-  const onStageMouseUp = () => {
-    isPanning.current = false
-    panMoved.current  = false
-  }
+  const onStageMouseUp = () => { isPanning.current = false; panMoved.current = false }
 
   const handleDelete = async (post: Post) => {
     await fetch(`/api/posts/${post.id}`, { method: 'DELETE' })
     setPosts((prev) => prev.filter((p) => p.id !== post.id))
     setSelectedPost(null)
+  }
+
+  const handleMoved = (post: Post, dx: number, dy: number) => {
+    const base = basePosition(post.id)
+    const newX = (post.pos_x || base.x) + dx
+    const newY = (post.pos_y || base.y) + dy
+    console.log('handleMoved', post.id, newX, newY)
+    setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, pos_x: newX, pos_y: newY } : p))
+    savePosition(post.id, newX, newY)
+  }
+
+  const handleResized = (post: Post, newW: number) => {
+    setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, card_size: newW } : p))
+    saveSize(post.id, newW)
   }
 
   return (
@@ -227,17 +253,13 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
       >
         <div
           className="wall-canvas"
-          style={{
-            transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
-            transformOrigin: 'center center',
-          }}
+          style={{ transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`, transformOrigin: 'center center' }}
         >
           {posts.map((post) => {
-            const saved = positions[post.id]
             const base  = basePosition(post.id)
-            const initX = saved?.x ?? base.x
-            const initY = saved?.y ?? base.y
-            const w     = sizes[post.id] ?? aspectW(post.file_type)
+            const initX = post.pos_x || base.x
+            const initY = post.pos_y || base.y
+            const w     = post.card_size || aspectW(post.file_type)
 
             return (
               <DraggableCard
@@ -246,13 +268,8 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
                 initX={initX}
                 initY={initY}
                 width={w}
-                onMoved={(dx, dy) =>
-                  setPositions((prev) => ({
-                    ...prev,
-                    [post.id]: { x: (prev[post.id]?.x ?? base.x) + dx, y: (prev[post.id]?.y ?? base.y) + dy },
-                  }))
-                }
-                onResized={(newW) => setSizes((prev) => ({ ...prev, [post.id]: newW }))}
+                onMoved={(dx, dy) => handleMoved(post, dx, dy)}
+                onResized={(newW) => handleResized(post, newW)}
                 onClick={() => setSelectedPost(post)}
               />
             )
@@ -315,8 +332,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         .upload-btn {
           background: #111; color: #fff; border: none; border-radius: 8px;
           padding: 9px 18px; font-size: 12px; font-weight: 600;
-          cursor: pointer; font-family: inherit; white-space: nowrap;
-          transition: opacity .15s;
+          cursor: pointer; font-family: inherit; white-space: nowrap; transition: opacity .15s;
         }
         .upload-btn:hover:not(.uploading) { opacity: .82; }
         .upload-btn.uploading { opacity: .5; cursor: default; }
@@ -328,16 +344,14 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         .zoom-controls button {
           background: none; border: none; cursor: pointer;
           font-size: 14px; font-weight: 600; color: #555;
-          padding: 2px 6px; border-radius: 4px; font-family: inherit;
-          transition: background .1s;
+          padding: 2px 6px; border-radius: 4px; font-family: inherit; transition: background .1s;
         }
         .zoom-controls button:hover { background: #f0f0f0; }
         .zoom-controls span { font-size: 11px; color: #888; min-width: 36px; text-align: center; }
         .wall-stage {
           flex: 1; margin-top: 53px; overflow: hidden;
           width: 100vw; height: calc(100vh - 53px);
-          cursor: grab;
-          display: flex; align-items: center; justify-content: center;
+          cursor: grab; display: flex; align-items: center; justify-content: center;
         }
         .wall-stage:active { cursor: grabbing; }
         .wall-canvas { position: relative; width: 1400px; height: 1200px; flex-shrink: 0; }
@@ -365,8 +379,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         .lb-close {
           position: absolute; top: 14px; right: 14px; z-index: 10;
           background: #111; color: #fff; border: none; border-radius: 20px;
-          padding: 7px 16px; font-size: 12px; font-weight: 600;
-          cursor: pointer; font-family: inherit;
+          padding: 7px 16px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
         }
         .lb-delete {
           position: absolute; top: 14px; left: 14px; z-index: 10;

@@ -126,6 +126,12 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     }
   }, [uploadFiles])
 
+  const handleDelete = async (post: Post) => {
+    await fetch(`/api/posts/${post.id}`, { method: 'DELETE' })
+    setPosts((prev) => prev.filter((p) => p.id !== post.id))
+    setSelectedPost(null)
+  }
+
   return (
     <div className="wall-root">
       <header className="topbar">
@@ -213,6 +219,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
       {selectedPost && (
         <div className="lightbox" onClick={() => setSelectedPost(null)}>
           <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
+            <button className="lb-delete" onClick={() => handleDelete(selectedPost)}>🗑 Ta bort</button>
             <button className="lb-close" onClick={() => setSelectedPost(null)}>✕ Stäng</button>
             <div className="lb-media">
               {selectedPost.file_type === 'image' ? (
@@ -308,6 +315,15 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
           padding: 7px 16px; font-size: 12px; font-weight: 600;
           cursor: pointer; font-family: inherit;
         }
+        .lb-delete {
+          position: absolute; top: 14px; left: 14px; z-index: 10;
+          background: #e03; color: #fff;
+          border: none; border-radius: 20px;
+          padding: 7px 16px; font-size: 12px; font-weight: 600;
+          cursor: pointer; font-family: inherit;
+          transition: opacity .15s;
+        }
+        .lb-delete:hover { opacity: .82; }
         .lb-media { background: #000; }
         .lb-media img, .lb-media video {
           display: block; width: 100%;

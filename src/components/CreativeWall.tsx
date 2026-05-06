@@ -143,14 +143,15 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
 
   // Pan on middle-mouse or space+drag
   const onStageMouseDown = (e: React.MouseEvent) => {
-    // Middle mouse or space held
-    if (e.button === 1 || e.button === 0 && (e.target as HTMLElement).classList.contains('wall-stage')) {
-      isPanning.current = true
-      panStart.current  = { x: e.clientX, y: e.clientY }
-      panOrigin.current = { ...pan }
-      e.preventDefault()
-    }
+  const target = e.target as HTMLElement
+  const isCard = target.closest('.wall-card')
+  if (e.button === 1 || (!isCard && e.button === 0)) {
+    isPanning.current = true
+    panStart.current  = { x: e.clientX, y: e.clientY }
+    panOrigin.current = { ...pan }
+    e.preventDefault()
   }
+}
   const onStageMouseMove = (e: React.MouseEvent) => {
     if (!isPanning.current) return
     const dx = (e.clientX - panStart.current.x) / zoom

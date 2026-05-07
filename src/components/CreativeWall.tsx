@@ -31,36 +31,25 @@ function debounce<T extends (...args: Parameters<T>) => void>(fn: T, ms: number)
   }
 }
 
-// Find an empty spot that doesn't overlap existing cards
 function findEmptySpot(posts: Post[]): { x: number; y: number } {
   const W = 260
   const H = 340
   const PADDING = 30
   const candidates = [
-    { x: 0, y: 0 },
-    { x: 320, y: 0 },
-    { x: -320, y: 0 },
-    { x: 0, y: 380 },
-    { x: 0, y: -380 },
-    { x: 320, y: 380 },
-    { x: -320, y: 380 },
-    { x: 320, y: -380 },
-    { x: -320, y: -380 },
-    { x: 640, y: 0 },
-    { x: -640, y: 0 },
+    { x: 0, y: 0 }, { x: 320, y: 0 }, { x: -320, y: 0 },
+    { x: 0, y: 380 }, { x: 0, y: -380 },
+    { x: 320, y: 380 }, { x: -320, y: 380 },
+    { x: 320, y: -380 }, { x: -320, y: -380 },
+    { x: 640, y: 0 }, { x: -640, y: 0 },
   ]
   for (const c of candidates) {
     const overlaps = posts.some((p) => {
       const px = p.pos_x || basePosition(p.id).x
       const py = p.pos_y || basePosition(p.id).y
-      return (
-        Math.abs(px - c.x) < W + PADDING &&
-        Math.abs(py - c.y) < H + PADDING
-      )
+      return Math.abs(px - c.x) < W + PADDING && Math.abs(py - c.y) < H + PADDING
     })
     if (!overlaps) return c
   }
-  // Fallback: offset from last card
   return { x: Math.random() * 400 - 200, y: Math.random() * 400 - 200 }
 }
 
@@ -72,6 +61,9 @@ interface Props {
   uploaderName: string
 }
 
+// Live positions from other users (broadcast, not persisted)
+type LivePositions = Record<string, { x: number; y: number }>
+
 export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   const [posts, setPosts]               = useState<Post[]>(initialPosts)
   const [selectedPost, setSelectedPost] = useState<Post | null>(null)
@@ -79,8 +71,10 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   const [uploading, setUploading]       = useState(false)
   const [uploadName, setUploadName]     = useState(uploaderName)
   const [caption, setCaption]           = useState('')
+  const [livePositions, setLivePositions] = useState<LivePositions>({})
   const fileInputRef                    = useRef<HTMLInputElement>(null)
   const dragCounter                     = useRef(0)
+  const broadcastChannel                = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   const [zoom, setZoom] = useState(1)
   const [pan, setPan]   = useState({ x: 0, y: 0 })
@@ -90,7 +84,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   const panOrigin       = useRef({ x: 0, y: 0 })
   const stageRef        = useRef<HTMLDivElement>(null)
 
-  // z-order: higher = on top
   const [zOrders, setZOrders] = useState<Record<string, number>>({})
   const zCounter              = useRef(1)
 
@@ -123,37 +116,53 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     []
   )
 
+  // Supabase Realtime – inserts + broadcast
   useEffect(() => {
-    const channel = supabase
-      .channel('wall-feed')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, (payload) => {
-        const p = payload.new as Post
-        setPosts((prev) => {
-          if (prev.some((x) => x.id === p.id)) return prev
-          // Place new card in empty spot
-          const spot = findEmptySpot(prev)
-          const newPost = { ...p, pos_x: spot.x, pos_y: spot.y }
-          // Save position to DB
-          fetch(`/api/posts/${p.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pos_x: spot.x, pos_y: spot.y }),
-          })
-          // Bring to front
-          zCounter.current++
-          setZOrders((z) => ({ ...z, [p.id]: zCounter.current }))
-          return [newPost, ...prev]
+    const channel = supabase.channel('wall-room')
+
+    // Listen for new posts
+    channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, (payload) => {
+      const p = payload.new as Post
+      setPosts((prev) => {
+        if (prev.some((x) => x.id === p.id)) return prev
+        const spot    = findEmptySpot(prev)
+        const newPost = { ...p, pos_x: spot.x, pos_y: spot.y }
+        fetch(`/api/posts/${p.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pos_x: spot.x, pos_y: spot.y }),
         })
+        zCounter.current++
+        setZOrders((z) => ({ ...z, [p.id]: zCounter.current }))
+        return [newPost, ...prev]
       })
-      .subscribe()
+    })
+
+    // Listen for live position broadcasts from other clients
+    channel.on('broadcast', { event: 'move' }, ({ payload }) => {
+      const { id, x, y } = payload as { id: string; x: number; y: number }
+      setLivePositions((prev) => ({ ...prev, [id]: { x, y } }))
+    })
+
+    channel.subscribe()
+    broadcastChannel.current = channel
+
     return () => { supabase.removeChannel(channel) }
+  }, [])
+
+  // Broadcast position during drag (called from DraggableCard)
+  const broadcastMove = useCallback((id: string, x: number, y: number) => {
+    broadcastChannel.current?.send({
+      type: 'broadcast',
+      event: 'move',
+      payload: { id, x, y },
+    })
   }, [])
 
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
     const list = Array.from(files)
     if (!list.length) return
     setUploading(true)
-
     for (const file of list) {
       const allowed = ['image/jpeg','image/png','image/gif','image/webp','video/mp4','video/quicktime']
       if (!allowed.includes(file.type)) { alert(`Filtyp stöds ej: ${file.type}`); continue }
@@ -181,13 +190,11 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
           caption: caption.trim() || null,
         }),
       })
-
       if (!res.ok) {
         const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
         alert(`DB error: ${error}`)
       }
     }
-
     setCaption('')
     setUploading(false)
   }, [uploadName, caption])
@@ -268,6 +275,8 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     const newX = (post.pos_x || base.x) + dx
     const newY = (post.pos_y || base.y) + dy
     setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, pos_x: newX, pos_y: newY } : p))
+    // Clear live position now that it's committed
+    setLivePositions((prev) => { const n = { ...prev }; delete n[post.id]; return n })
     savePosition(post.id, newX, newY)
   }
 
@@ -335,8 +344,9 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         >
           {posts.map((post) => {
             const base  = basePosition(post.id)
-            const initX = post.pos_x || base.x
-            const initY = post.pos_y || base.y
+            const live  = livePositions[post.id]
+            const initX = live?.x ?? post.pos_x ?? base.x
+            const initY = live?.y ?? post.pos_y ?? base.y
             const w     = post.card_size || aspectW(post.file_type)
             const z     = zOrders[post.id] ?? 1
 
@@ -348,6 +358,8 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
                 initY={initY}
                 width={w}
                 zIndex={z}
+                isLive={!!live}
+                onDragging={(x, y) => broadcastMove(post.id, x, y)}
                 onMoved={(dx, dy) => { bringToFront(post.id); handleMoved(post, dx, dy) }}
                 onResized={(newW) => handleResized(post, newW)}
                 onClick={() => { bringToFront(post.id); setSelectedPost(post) }}
@@ -487,12 +499,14 @@ interface CardProps {
   initY: number
   width: number
   zIndex: number
+  isLive: boolean
+  onDragging: (x: number, y: number) => void
   onMoved: (dx: number, dy: number) => void
   onResized: (newW: number) => void
   onClick: () => void
 }
 
-function DraggableCard({ post, initX, initY, width, zIndex, onMoved, onResized, onClick }: CardProps) {
+function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, onMoved, onResized, onClick }: CardProps) {
   const resizing    = useRef(false)
   const startX      = useRef(0)
   const startW      = useRef(0)
@@ -504,16 +518,22 @@ function DraggableCard({ post, initX, initY, width, zIndex, onMoved, onResized, 
   const cardRef     = useRef<HTMLElement>(null)
   const aspectClass = post.file_type === 'video' ? 'aspect-video' : 'aspect-[4/5]'
 
-  useEffect(() => { posX.current = initX }, [initX])
-  useEffect(() => { posY.current = initY }, [initY])
+  // When live position arrives from another user, update DOM directly
+  useEffect(() => {
+    if (!dragging.current) {
+      posX.current = initX
+      posY.current = initY
+      if (cardRef.current) {
+        cardRef.current.style.transform = `translate(${initX}px, ${initY}px)`
+      }
+    }
+  }, [initX, initY])
 
-  const setCardTransform = () => {
+  const setCardTransform = (x: number, y: number) => {
     if (cardRef.current) {
-      cardRef.current.style.transform = `translate(${posX.current}px, ${posY.current}px)`
+      cardRef.current.style.transform = `translate(${x}px, ${y}px)`
     }
   }
-
-  useEffect(() => { setCardTransform() })
 
   const onCardPointerDown = (e: React.PointerEvent) => {
     if (resizing.current) return
@@ -528,7 +548,8 @@ function DraggableCard({ post, initX, initY, width, zIndex, onMoved, onResized, 
     if (!dragging.current) return
     posX.current = e.clientX - dragStartX.current
     posY.current = e.clientY - dragStartY.current
-    setCardTransform()
+    setCardTransform(posX.current, posY.current)
+    onDragging(posX.current, posY.current)
   }
 
   const onCardPointerUp = () => {
@@ -563,7 +584,7 @@ function DraggableCard({ post, initX, initY, width, zIndex, onMoved, onResized, 
   return (
     <article
       ref={cardRef as React.RefObject<HTMLElement>}
-      className="wall-card"
+      className={`wall-card ${isLive ? 'is-live' : ''}`}
       style={{
         width,
         position: 'absolute',
@@ -603,9 +624,14 @@ function DraggableCard({ post, initX, initY, width, zIndex, onMoved, onResized, 
           background: #fff; border: 1px solid rgba(0,0,0,.08);
           box-shadow: 0 4px 20px rgba(0,0,0,.13), 0 1px 4px rgba(0,0,0,.06);
           user-select: none; touch-action: none;
+          transition: box-shadow .2s ease;
         }
         .wall-card:active { cursor: grabbing; }
         .wall-card:hover  { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); }
+        .wall-card.is-live {
+          outline: 2px solid #4a9eff;
+          outline-offset: 2px;
+        }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
         .card-media img, .card-media video {
           width: 100%; height: 100%; object-fit: cover; display: block;

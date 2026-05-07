@@ -61,8 +61,8 @@ interface Props {
   uploaderName: string
 }
 
-// Live positions from other users (broadcast, not persisted)
 type LivePositions = Record<string, { x: number; y: number }>
+type LiveSizes = Record<string, number>
 
 export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   const [posts, setPosts]               = useState<Post[]>(initialPosts)
@@ -72,6 +72,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   const [uploadName, setUploadName]     = useState(uploaderName)
   const [caption, setCaption]           = useState('')
   const [livePositions, setLivePositions] = useState<LivePositions>({})
+  const [liveSizes, setLiveSizes]         = useState<LiveSizes>({})
   const fileInputRef                    = useRef<HTMLInputElement>(null)
   const dragCounter                     = useRef(0)
   const broadcastChannel                = useRef<ReturnType<typeof supabase.channel> | null>(null)
@@ -116,11 +117,9 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     []
   )
 
-  // Supabase Realtime – inserts + broadcast
   useEffect(() => {
     const channel = supabase.channel('wall-room')
 
-    // Listen for new posts
     channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, (payload) => {
       const p = payload.new as Post
       setPosts((prev) => {
@@ -138,10 +137,14 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
       })
     })
 
-    // Listen for live position broadcasts from other clients
     channel.on('broadcast', { event: 'move' }, ({ payload }) => {
       const { id, x, y } = payload as { id: string; x: number; y: number }
       setLivePositions((prev) => ({ ...prev, [id]: { x, y } }))
+    })
+
+    channel.on('broadcast', { event: 'resize' }, ({ payload }) => {
+      const { id, w } = payload as { id: string; w: number }
+      setLiveSizes((prev) => ({ ...prev, [id]: w }))
     })
 
     channel.subscribe()
@@ -150,12 +153,19 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // Broadcast position during drag (called from DraggableCard)
   const broadcastMove = useCallback((id: string, x: number, y: number) => {
     broadcastChannel.current?.send({
       type: 'broadcast',
       event: 'move',
       payload: { id, x, y },
+    })
+  }, [])
+
+  const broadcastResize = useCallback((id: string, w: number) => {
+    broadcastChannel.current?.send({
+      type: 'broadcast',
+      event: 'resize',
+      payload: { id, w },
     })
   }, [])
 
@@ -275,14 +285,22 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     const newX = (post.pos_x || base.x) + dx
     const newY = (post.pos_y || base.y) + dy
     setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, pos_x: newX, pos_y: newY } : p))
-    // Clear live position now that it's committed
     setLivePositions((prev) => { const n = { ...prev }; delete n[post.id]; return n })
     savePosition(post.id, newX, newY)
   }
 
   const handleResized = (post: Post, newW: number) => {
     setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, card_size: newW } : p))
+    setLiveSizes((prev) => { const n = { ...prev }; delete n[post.id]; return n })
     saveSize(post.id, newW)
+  }
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen()
+    } else {
+      document.exitFullscreen()
+    }
   }
 
   return (
@@ -322,24 +340,12 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
             onChange={(e) => { if (e.target.files) uploadFiles(e.target.files); e.target.value = '' }}
           />
           <div className="zoom-controls">
-  <button onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.2))}>＋</button>
-  <span>{Math.round(zoom * 100)}%</span>
-  <button onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.2))}>－</button>
-  <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>↺</button>
-</div>
-
-<button
-  className="upload-btn"
-  onClick={() => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen()
-    } else {
-      document.exitFullscreen()
-    }
-  }}
->
-  ⛶
-</button>
+            <button onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.2))}>＋</button>
+            <span>{Math.round(zoom * 100)}%</span>
+            <button onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.2))}>－</button>
+            <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>↺</button>
+          </div>
+          <button className="upload-btn" onClick={toggleFullscreen}>⛶</button>
         </div>
       </header>
 
@@ -360,7 +366,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
             const live  = livePositions[post.id]
             const initX = live?.x ?? post.pos_x ?? base.x
             const initY = live?.y ?? post.pos_y ?? base.y
-            const w     = post.card_size || aspectW(post.file_type)
+            const w     = liveSizes[post.id] ?? post.card_size ?? aspectW(post.file_type)
             const z     = zOrders[post.id] ?? 1
 
             return (
@@ -373,6 +379,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
                 zIndex={z}
                 isLive={!!live}
                 onDragging={(x, y) => broadcastMove(post.id, x, y)}
+                onResizing={(w) => broadcastResize(post.id, w)}
                 onMoved={(dx, dy) => { bringToFront(post.id); handleMoved(post, dx, dy) }}
                 onResized={(newW) => handleResized(post, newW)}
                 onClick={() => { bringToFront(post.id); setSelectedPost(post) }}
@@ -514,12 +521,13 @@ interface CardProps {
   zIndex: number
   isLive: boolean
   onDragging: (x: number, y: number) => void
+  onResizing: (w: number) => void
   onMoved: (dx: number, dy: number) => void
   onResized: (newW: number) => void
   onClick: () => void
 }
 
-function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, onMoved, onResized, onClick }: CardProps) {
+function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, onResizing, onMoved, onResized, onClick }: CardProps) {
   const resizing    = useRef(false)
   const startX      = useRef(0)
   const startW      = useRef(0)
@@ -531,7 +539,6 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, 
   const cardRef     = useRef<HTMLElement>(null)
   const aspectClass = post.file_type === 'video' ? 'aspect-video' : 'aspect-[4/5]'
 
-  // When live position arrives from another user, update DOM directly
   useEffect(() => {
     if (!dragging.current) {
       posX.current = initX
@@ -541,6 +548,12 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, 
       }
     }
   }, [initX, initY])
+
+  useEffect(() => {
+    if (!resizing.current && cardRef.current) {
+      cardRef.current.style.width = `${width}px`
+    }
+  }, [width])
 
   const setCardTransform = (x: number, y: number) => {
     if (cardRef.current) {
@@ -589,7 +602,9 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, 
   const onResizePointerMove = (e: React.PointerEvent) => {
     if (!resizing.current) return
     const newW = Math.max(120, Math.min(600, startW.current + e.clientX - startX.current))
+    if (cardRef.current) cardRef.current.style.width = `${newW}px`
     onResized(newW)
+    onResizing(newW)
   }
 
   const onResizePointerUp = () => { resizing.current = false }

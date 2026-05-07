@@ -59,23 +59,24 @@ const MAX_ZOOM = 3
 interface Props {
   initialPosts: Post[]
   uploaderName: string
+  displayMode?: boolean
 }
 
 type LivePositions = Record<string, { x: number; y: number }>
 type LiveSizes = Record<string, number>
 
-export default function CreativeWall({ initialPosts, uploaderName }: Props) {
-  const [posts, setPosts]               = useState<Post[]>(initialPosts)
-  const [selectedPost, setSelectedPost] = useState<Post | null>(null)
-  const [isFileDrag, setIsFileDrag]     = useState(false)
-  const [uploading, setUploading]       = useState(false)
-  const [uploadName, setUploadName]     = useState(uploaderName)
-  const [caption, setCaption]           = useState('')
+export default function CreativeWall({ initialPosts, uploaderName, displayMode = false }: Props) {
+  const [posts, setPosts]                 = useState<Post[]>(initialPosts)
+  const [selectedPost, setSelectedPost]   = useState<Post | null>(null)
+  const [isFileDrag, setIsFileDrag]       = useState(false)
+  const [uploading, setUploading]         = useState(false)
+  const [uploadName, setUploadName]       = useState(uploaderName)
+  const [caption, setCaption]             = useState('')
   const [livePositions, setLivePositions] = useState<LivePositions>({})
   const [liveSizes, setLiveSizes]         = useState<LiveSizes>({})
-  const fileInputRef                    = useRef<HTMLInputElement>(null)
-  const dragCounter                     = useRef(0)
-  const broadcastChannel                = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const fileInputRef                      = useRef<HTMLInputElement>(null)
+  const dragCounter                       = useRef(0)
+  const broadcastChannel                  = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   const [zoom, setZoom] = useState(1)
   const [pan, setPan]   = useState({ x: 0, y: 0 })
@@ -210,6 +211,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   }, [uploadName, caption])
 
   useEffect(() => {
+    if (displayMode) return
     const onDragEnter = (e: DragEvent) => {
       if (!e.dataTransfer?.types.includes('Files')) return
       dragCounter.current++
@@ -237,7 +239,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
       window.removeEventListener('dragover',  onDragOver)
       window.removeEventListener('drop',      onDrop)
     }
-  }, [uploadFiles])
+  }, [uploadFiles, displayMode])
 
   useEffect(() => {
     const el = stageRef.current
@@ -305,53 +307,58 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
 
   return (
     <div className="wall-root">
-      <header className="topbar">
-        <div className="topbar-left">
-          <span className="zoom-hint">Scroll för att zooma · Dra bakgrunden för att panorera</span>
-        </div>
-        <div className="topbar-right">
-          <input
-            className="field nm"
-            type="text"
-            placeholder="Ditt namn"
-            value={uploadName}
-            onChange={(e) => { setUploadName(e.target.value); localStorage.setItem('showandtell_name', e.target.value) }}
-          />
-          <input
-            className="field cp"
-            type="text"
-            placeholder="Beskrivning…"
-            value={caption}
-            onChange={(e) => setCaption(e.target.value)}
-          />
-          <button
-            className={`upload-btn ${uploading ? 'uploading' : ''}`}
-            disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            {uploading ? 'Laddar upp…' : '＋ Lägg till'}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,video/mp4,video/quicktime"
-            multiple
-            style={{ display: 'none' }}
-            onChange={(e) => { if (e.target.files) uploadFiles(e.target.files); e.target.value = '' }}
-          />
-          <div className="zoom-controls">
-            <button onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.2))}>＋</button>
-            <span>{Math.round(zoom * 100)}%</span>
-            <button onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.2))}>－</button>
-            <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>↺</button>
+
+      {/* Topbar – dold i display mode */}
+      {!displayMode && (
+        <header className="topbar">
+          <div className="topbar-left">
+            <span className="zoom-hint">Scroll för att zooma · Dra bakgrunden för att panorera</span>
           </div>
-          <button className="upload-btn" onClick={toggleFullscreen}>⛶</button>
-        </div>
-      </header>
+          <div className="topbar-right">
+            <input
+              className="field nm"
+              type="text"
+              placeholder="Ditt namn"
+              value={uploadName}
+              onChange={(e) => { setUploadName(e.target.value); localStorage.setItem('showandtell_name', e.target.value) }}
+            />
+            <input
+              className="field cp"
+              type="text"
+              placeholder="Beskrivning…"
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+            />
+            <button
+              className={`upload-btn ${uploading ? 'uploading' : ''}`}
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {uploading ? 'Laddar upp…' : '＋ Lägg till'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,video/mp4,video/quicktime"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => { if (e.target.files) uploadFiles(e.target.files); e.target.value = '' }}
+            />
+            <div className="zoom-controls">
+              <button onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.2))}>＋</button>
+              <span>{Math.round(zoom * 100)}%</span>
+              <button onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.2))}>－</button>
+              <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>↺</button>
+            </div>
+            <button className="upload-btn" onClick={toggleFullscreen}>⛶</button>
+          </div>
+        </header>
+      )}
 
       <div
         ref={stageRef}
         className="wall-stage"
+        style={{ marginTop: displayMode ? 0 : 53 }}
         onMouseDown={onStageMouseDown}
         onMouseMove={onStageMouseMove}
         onMouseUp={onStageMouseUp}
@@ -378,11 +385,12 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
                 width={w}
                 zIndex={z}
                 isLive={!!live}
+                displayMode={displayMode}
                 onDragging={(x, y) => broadcastMove(post.id, x, y)}
                 onResizing={(w) => broadcastResize(post.id, w)}
                 onMoved={(dx, dy) => { bringToFront(post.id); handleMoved(post, dx, dy) }}
                 onResized={(newW) => handleResized(post, newW)}
-                onClick={() => { bringToFront(post.id); setSelectedPost(post) }}
+                onClick={() => { if (!displayMode) { bringToFront(post.id); setSelectedPost(post) } }}
               />
             )
           })}
@@ -399,7 +407,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         </div>
       )}
 
-      {selectedPost && (
+      {selectedPost && !displayMode && (
         <div className="lightbox" onClick={() => setSelectedPost(null)}>
           <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
             <button className="lb-delete" onClick={() => handleDelete(selectedPost)}>🗑 Ta bort</button>
@@ -461,7 +469,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
         .zoom-controls button:hover { background: #f0f0f0; }
         .zoom-controls span { font-size: 11px; color: #888; min-width: 36px; text-align: center; }
         .wall-stage {
-          flex: 1; margin-top: 53px; overflow: hidden;
+          flex: 1; overflow: hidden;
           width: 100vw; height: calc(100vh - 53px);
           cursor: grab; display: flex; align-items: center; justify-content: center;
         }
@@ -520,6 +528,7 @@ interface CardProps {
   width: number
   zIndex: number
   isLive: boolean
+  displayMode: boolean
   onDragging: (x: number, y: number) => void
   onResizing: (w: number) => void
   onMoved: (dx: number, dy: number) => void
@@ -527,7 +536,7 @@ interface CardProps {
   onClick: () => void
 }
 
-function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, onResizing, onMoved, onResized, onClick }: CardProps) {
+function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode, onDragging, onResizing, onMoved, onResized, onClick }: CardProps) {
   const resizing    = useRef(false)
   const startX      = useRef(0)
   const startW      = useRef(0)
@@ -562,6 +571,7 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, 
   }
 
   const onCardPointerDown = (e: React.PointerEvent) => {
+    if (displayMode) return
     if (resizing.current) return
     if ((e.target as HTMLElement).classList.contains('resize-handle')) return
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -591,6 +601,7 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, 
   }
 
   const onResizePointerDown = (e: React.PointerEvent) => {
+    if (displayMode) return
     e.stopPropagation()
     e.preventDefault()
     resizing.current = true
@@ -612,7 +623,7 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, 
   return (
     <article
       ref={cardRef as React.RefObject<HTMLElement>}
-      className={`wall-card ${isLive ? 'is-live' : ''}`}
+      className={`wall-card ${isLive ? 'is-live' : ''} ${displayMode ? 'display-mode' : ''}`}
       style={{
         width,
         position: 'absolute',
@@ -633,18 +644,28 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, 
           ? <img src={post.file_url} alt={post.caption ?? ''} draggable={false} />
           : <video src={post.file_url} muted loop playsInline autoPlay />
         }
-        <div className="card-hover-overlay">
-          <span className="card-user">{post.uploader_name}</span>
-          {post.caption && <span className="card-caption">{post.caption}</span>}
-        </div>
+        {!displayMode && (
+          <div className="card-hover-overlay">
+            <span className="card-user">{post.uploader_name}</span>
+            {post.caption && <span className="card-caption">{post.caption}</span>}
+          </div>
+        )}
+        {displayMode && post.uploader_name && (
+          <div className="display-label">
+            <span className="card-user">{post.uploader_name}</span>
+            {post.caption && <span className="card-caption">{post.caption}</span>}
+          </div>
+        )}
       </div>
 
-      <div
-        className="resize-handle"
-        onPointerDown={onResizePointerDown}
-        onPointerMove={onResizePointerMove}
-        onPointerUp={onResizePointerUp}
-      />
+      {!displayMode && (
+        <div
+          className="resize-handle"
+          onPointerDown={onResizePointerDown}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={onResizePointerUp}
+        />
+      )}
 
       <style>{`
         .wall-card {
@@ -656,17 +677,15 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, 
         }
         .wall-card:active { cursor: grabbing; }
         .wall-card:hover  { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); }
-        .wall-card.is-live {
-          outline: 2px solid #4a9eff;
-          outline-offset: 2px;
-        }
+        .wall-card.display-mode { cursor: default; }
+        .wall-card.is-live { outline: 2px solid #4a9eff; outline-offset: 2px; }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
         .card-media img, .card-media video {
           width: 100%; height: 100%; object-fit: cover; display: block;
           transition: transform .45s ease; pointer-events: none;
         }
-        .wall-card:hover .card-media img,
-        .wall-card:hover .card-media video { transform: scale(1.05); }
+        .wall-card:not(.display-mode):hover .card-media img,
+        .wall-card:not(.display-mode):hover .card-media video { transform: scale(1.05); }
         .card-hover-overlay {
           position: absolute; inset: 0;
           background: linear-gradient(to top, rgba(0,0,0,.72) 0%, rgba(0,0,0,.1) 50%, transparent 100%);
@@ -676,6 +695,12 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, onDragging, 
           transform: translateY(6px); border-radius: 22px;
         }
         .wall-card:hover .card-hover-overlay { opacity: 1; transform: translateY(0); }
+        .display-label {
+          position: absolute; bottom: 0; left: 0; right: 0;
+          background: linear-gradient(to top, rgba(0,0,0,.65) 0%, transparent 100%);
+          display: flex; flex-direction: column; justify-content: flex-end;
+          padding: 14px; border-radius: 0 0 22px 22px;
+        }
         .card-user    { font-size: 12px; font-weight: 700; color: #fff; }
         .card-caption { font-size: 11px; color: rgba(255,255,255,.75); margin-top: 2px; }
         .resize-handle {

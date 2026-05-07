@@ -68,6 +68,7 @@ type LiveSizes = Record<string, number>
 export default function CreativeWall({ initialPosts, uploaderName, displayMode = false }: Props) {
   const [posts, setPosts]                 = useState<Post[]>(initialPosts)
   const [selectedPost, setSelectedPost]   = useState<Post | null>(null)
+  const [focusedPost, setFocusedPost]     = useState<Post | null>(null)
   const [isFileDrag, setIsFileDrag]       = useState(false)
   const [uploading, setUploading]         = useState(false)
   const [uploadName, setUploadName]       = useState(uploaderName)
@@ -155,19 +156,11 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
   }, [])
 
   const broadcastMove = useCallback((id: string, x: number, y: number) => {
-    broadcastChannel.current?.send({
-      type: 'broadcast',
-      event: 'move',
-      payload: { id, x, y },
-    })
+    broadcastChannel.current?.send({ type: 'broadcast', event: 'move', payload: { id, x, y } })
   }, [])
 
   const broadcastResize = useCallback((id: string, w: number) => {
-    broadcastChannel.current?.send({
-      type: 'broadcast',
-      event: 'resize',
-      payload: { id, w },
-    })
+    broadcastChannel.current?.send({ type: 'broadcast', event: 'resize', payload: { id, w } })
   }, [])
 
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
@@ -253,6 +246,15 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
+  // ESC closes focus mode
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setFocusedPost(null); setSelectedPost(null) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const onStageMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement
     const isCard = target.closest('.wall-card')
@@ -305,10 +307,19 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
     }
   }
 
+  const handleCardClick = (post: Post) => {
+    if (displayMode) {
+      // Display mode: toggle focus/show-only
+      setFocusedPost((prev) => prev?.id === post.id ? null : post)
+    } else {
+      bringToFront(post.id)
+      setSelectedPost(post)
+    }
+  }
+
   return (
     <div className="wall-root">
 
-      {/* Topbar – dold i display mode */}
       {!displayMode && (
         <header className="topbar">
           <div className="topbar-left">
@@ -390,13 +401,14 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
                 onResizing={(w) => broadcastResize(post.id, w)}
                 onMoved={(dx, dy) => { bringToFront(post.id); handleMoved(post, dx, dy) }}
                 onResized={(newW) => handleResized(post, newW)}
-                onClick={() => { if (!displayMode) { bringToFront(post.id); setSelectedPost(post) } }}
+                onClick={() => handleCardClick(post)}
               />
             )
           })}
         </div>
       </div>
 
+      {/* FILE DRAG OVERLAY */}
       {isFileDrag && (
         <div className="drop-overlay">
           <div className="drop-box">
@@ -407,6 +419,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         </div>
       )}
 
+      {/* LIGHTBOX – normal mode */}
       {selectedPost && !displayMode && (
         <div className="lightbox" onClick={() => setSelectedPost(null)}>
           <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
@@ -424,6 +437,24 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
               {selectedPost.caption && <span className="lb-caption">{selectedPost.caption}</span>}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* SHOW ONLY – display mode fullscreen focus */}
+      {focusedPost && displayMode && (
+        <div className="show-only" onClick={() => setFocusedPost(null)}>
+          {focusedPost.file_type === 'image'
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={focusedPost.file_url} alt={focusedPost.caption ?? ''} />
+            : <video src={focusedPost.file_url} autoPlay loop playsInline muted />
+          }
+          {(focusedPost.uploader_name || focusedPost.caption) && (
+            <div className="show-only-label">
+              <span className="show-only-user">{focusedPost.uploader_name}</span>
+              {focusedPost.caption && <span className="show-only-caption">{focusedPost.caption}</span>}
+            </div>
+          )}
+          <div className="show-only-hint">Klicka för att stänga</div>
         </div>
       )}
 
@@ -516,6 +547,37 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         }
         .lb-user    { font-size: 13px; font-weight: 700; color: #111; }
         .lb-caption { font-size: 12px; color: #777; }
+
+        /* SHOW ONLY */
+        .show-only {
+          position: fixed; inset: 0; z-index: 400;
+          background: #000;
+          display: flex; align-items: center; justify-content: center;
+          cursor: pointer;
+          animation: fadeIn .3s ease;
+        }
+        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+        .show-only img, .show-only video {
+          max-width: 100%; max-height: 100%;
+          object-fit: contain;
+          display: block;
+        }
+        .show-only-label {
+          position: absolute; bottom: 40px; left: 50%;
+          transform: translateX(-50%);
+          display: flex; flex-direction: column; align-items: center; gap: 6px;
+          background: rgba(0,0,0,.5);
+          backdrop-filter: blur(8px);
+          border-radius: 12px;
+          padding: 12px 24px;
+        }
+        .show-only-user    { font-size: 16px; font-weight: 700; color: #fff; }
+        .show-only-caption { font-size: 13px; color: rgba(255,255,255,.7); }
+        .show-only-hint {
+          position: absolute; top: 20px; right: 24px;
+          font-size: 11px; color: rgba(255,255,255,.3);
+          pointer-events: none;
+        }
       `}</style>
     </div>
   )
@@ -650,7 +712,7 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
             {post.caption && <span className="card-caption">{post.caption}</span>}
           </div>
         )}
-        {displayMode && post.uploader_name && (
+        {displayMode && (
           <div className="display-label">
             <span className="card-user">{post.uploader_name}</span>
             {post.caption && <span className="card-caption">{post.caption}</span>}
@@ -677,7 +739,7 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
         }
         .wall-card:active { cursor: grabbing; }
         .wall-card:hover  { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); }
-        .wall-card.display-mode { cursor: default; }
+        .wall-card.display-mode { cursor: pointer; }
         .wall-card.is-live { outline: 2px solid #4a9eff; outline-offset: 2px; }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
         .card-media img, .card-media video {
@@ -686,6 +748,8 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
         }
         .wall-card:not(.display-mode):hover .card-media img,
         .wall-card:not(.display-mode):hover .card-media video { transform: scale(1.05); }
+        .wall-card.display-mode:hover .card-media img,
+        .wall-card.display-mode:hover .card-media video { transform: scale(1.03); }
         .card-hover-overlay {
           position: absolute; inset: 0;
           background: linear-gradient(to top, rgba(0,0,0,.72) 0%, rgba(0,0,0,.1) 50%, transparent 100%);

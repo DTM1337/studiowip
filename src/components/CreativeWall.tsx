@@ -299,6 +299,37 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
     saveSize(post.id, newW)
   }
 
+  const fitAll = () => {
+  if (posts.length === 0) return
+  const CARD_W = 260
+  const CARD_H = 340
+  const PADDING = 80
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  posts.forEach((p) => {
+    const base = basePosition(p.id)
+    const x = p.pos_x ?? base.x
+    const y = p.pos_y ?? base.y
+    const w = p.card_size ?? CARD_W
+    minX = Math.min(minX, x - w / 2)
+    maxX = Math.max(maxX, x + w / 2)
+    minY = Math.min(minY, y - CARD_H / 2)
+    maxY = Math.max(maxY, y + CARD_H / 2)
+  })
+
+  const contentW = maxX - minX + PADDING * 2
+  const contentH = maxY - minY + PADDING * 2
+  const viewW    = window.innerWidth
+  const viewH    = window.innerHeight - 53
+
+  const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(viewW / contentW, viewH / contentH)))
+  const centerX = (minX + maxX) / 2
+  const centerY = (minY + maxY) / 2
+
+  setZoom(newZoom)
+  setPan({ x: -centerX, y: -centerY })
+}
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen()
@@ -361,6 +392,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
               <button onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.2))}>－</button>
               <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>↺</button>
             </div>
+            <button className="upload-btn" onClick={fitAll}>⊡</button>
             <button className="upload-btn" onClick={toggleFullscreen}>⛶</button>
           </div>
         </header>

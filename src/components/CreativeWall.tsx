@@ -448,12 +448,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
             ? <img src={focusedPost.file_url} alt={focusedPost.caption ?? ''} />
             : <video src={focusedPost.file_url} autoPlay loop playsInline muted />
           }
-          {(focusedPost.uploader_name || focusedPost.caption) && (
-            <div className="show-only-label">
-              <span className="show-only-user">{focusedPost.uploader_name}</span>
-              {focusedPost.caption && <span className="show-only-caption">{focusedPost.caption}</span>}
-            </div>
-          )}
+          
           <div className="show-only-hint">Klicka för att stänga</div>
         </div>
       )}

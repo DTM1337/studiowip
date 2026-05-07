@@ -61,7 +61,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const savePosition = useCallback(
     debounce((id: string, pos_x: number, pos_y: number) => {
-      console.log('savePosition', id, pos_x, pos_y)
       fetch(`/api/posts/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -94,50 +93,48 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
- const uploadFiles = useCallback(async (files: FileList | File[]) => {
-  const list = Array.from(files)
-  if (!list.length) return
-  setUploading(true)
+  const uploadFiles = useCallback(async (files: FileList | File[]) => {
+    const list = Array.from(files)
+    if (!list.length) return
+    setUploading(true)
 
-  for (const file of list) {
-    const allowed = ['image/jpeg','image/png','image/gif','image/webp','video/mp4','video/quicktime']
-    if (!allowed.includes(file.type)) { alert(`Filtyp stöds ej: ${file.type}`); continue }
-    if (file.size > 50 * 1024 * 1024) { alert('Max 50MB per fil'); continue }
+    for (const file of list) {
+      const allowed = ['image/jpeg','image/png','image/gif','image/webp','video/mp4','video/quicktime']
+      if (!allowed.includes(file.type)) { alert(`Filtyp stöds ej: ${file.type}`); continue }
+      if (file.size > 50 * 1024 * 1024) { alert('Max 50MB per fil'); continue }
 
-    const ext      = file.name.split('.').pop() ?? 'bin'
-    const fileName = `${crypto.randomUUID()}.${ext}`
-    const fileType = file.type.startsWith('video/') ? 'video' : 'image'
+      const ext      = file.name.split('.').pop() ?? 'bin'
+      const fileName = `${crypto.randomUUID()}.${ext}`
+      const fileType = file.type.startsWith('video/') ? 'video' : 'image'
 
-    // Upload directly to Supabase Storage from the browser
-    const { error: storageError } = await supabase.storage
-      .from('media')
-      .upload(fileName, file, { contentType: file.type, upsert: false })
+      const { error: storageError } = await supabase.storage
+        .from('media')
+        .upload(fileName, file, { contentType: file.type, upsert: false })
 
-    if (storageError) { alert(`Storage error: ${storageError.message}`); continue }
+      if (storageError) { alert(`Storage error: ${storageError.message}`); continue }
 
-    const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName)
+      const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName)
 
-    // Save metadata to DB via API
-    const res = await fetch('/api/upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        file_url: publicUrl,
-        file_type: fileType,
-        uploader_name: uploadName.trim() || 'Anonymous',
-        caption: caption.trim() || null,
-      }),
-    })
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_url: publicUrl,
+          file_type: fileType,
+          uploader_name: uploadName.trim() || 'Anonymous',
+          caption: caption.trim() || null,
+        }),
+      })
 
-    if (!res.ok) {
-      const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
-      alert(`DB error: ${error}`)
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
+        alert(`DB error: ${error}`)
+      }
     }
-  }
 
-  setCaption('')
-  setUploading(false)
-}, [uploadName, caption])
+    setCaption('')
+    setUploading(false)
+  }, [uploadName, caption])
 
   useEffect(() => {
     const onDragEnter = (e: DragEvent) => {
@@ -214,7 +211,6 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
     const base = basePosition(post.id)
     const newX = (post.pos_x || base.x) + dx
     const newY = (post.pos_y || base.y) + dy
-    console.log('handleMoved', post.id, newX, newY)
     setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, pos_x: newX, pos_y: newY } : p))
     savePosition(post.id, newX, newY)
   }
@@ -450,6 +446,7 @@ function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick 
     resizing.current = true
     startX.current   = e.clientX
     startW.current   = width
+
     const onMouseMove = (ev: MouseEvent) => {
       if (!resizing.current) return
       const newW = Math.max(120, Math.min(600, startW.current + ev.clientX - startX.current))
@@ -489,7 +486,12 @@ function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick 
           {post.caption && <span className="card-caption">{post.caption}</span>}
         </div>
       </div>
-      <div className="resize-handle" onMouseDown={onResizeMouseDown} />
+
+      <div
+        className="resize-handle"
+        onMouseDown={onResizeMouseDown}
+        onPointerDown={(e) => e.stopPropagation()}
+      />
 
       <style>{`
         .wall-card {

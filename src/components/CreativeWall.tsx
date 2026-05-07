@@ -246,7 +246,6 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  // ESC closes focus mode
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { setFocusedPost(null); setSelectedPost(null) }
@@ -286,8 +285,8 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
 
   const handleMoved = (post: Post, dx: number, dy: number) => {
     const base = basePosition(post.id)
-    const newX = (post.pos_x || base.x) + dx
-    const newY = (post.pos_y || base.y) + dy
+    const newX = (post.pos_x !== null && post.pos_x !== undefined ? post.pos_x : base.x) + dx
+    const newY = (post.pos_y !== null && post.pos_y !== undefined ? post.pos_y : base.y) + dy
     setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, pos_x: newX, pos_y: newY } : p))
     setLivePositions((prev) => { const n = { ...prev }; delete n[post.id]; return n })
     savePosition(post.id, newX, newY)
@@ -300,50 +299,34 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
   }
 
   const fitAll = () => {
-  if (posts.length === 0) return
-  const PADDING = 100
+    if (posts.length === 0) return
+    const PADDING = 100
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
 
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    posts.forEach((p) => {
+      const base = basePosition(p.id)
+      const x = (p.pos_x !== null && p.pos_x !== undefined) ? p.pos_x : base.x
+      const y = (p.pos_y !== null && p.pos_y !== undefined) ? p.pos_y : base.y
+      const w = p.card_size || aspectW(p.file_type)
+      const h = p.file_type === 'video' ? w * 9 / 16 : w * 5 / 4
+
+      minX = Math.min(minX, x - w / 2)
+      maxX = Math.max(maxX, x + w / 2)
+      minY = Math.min(minY, y - 100)
+      maxY = Math.max(maxY, y - 100 + h)
+    })
+
+    const contentW = maxX - minX + PADDING * 2
+    const contentH = maxY - minY + PADDING * 2
+    const viewW    = window.innerWidth
+    const viewH    = window.innerHeight - 53
+    const newZoom  = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(viewW / contentW, viewH / contentH)))
+    const centerX  = (minX + maxX) / 2
+    const centerY  = (minY + maxY) / 2
+
+    setZoom(newZoom)
+    setPan({ x: -centerX, y: -centerY })
   }
-
-  posts.forEach((p) => {
-    const base = basePosition(p.id)
-    const x = (p.pos_x !== null && p.pos_x !== undefined) ? p.pos_x : base.x
-    const y = (p.pos_y !== null && p.pos_y !== undefined) ? p.pos_y : base.y
-    const w = p.card_size || aspectW(p.file_type)
-    const h = p.file_type === 'video' ? w * 9 / 16 : w * 5 / 4
-
-    minX = Math.min(minX, x - w / 2)
-    maxX = Math.max(maxX, x + w / 2)
-    minY = Math.min(minY, y - 100)
-    maxY = Math.max(maxY, y - 100 + h)
-  })
-
-  const contentW = maxX - minX + PADDING * 2
-  const contentH = maxY - minY + PADDING * 2
-  const viewW    = window.innerWidth
-  const viewH    = window.innerHeight - 53
-
-  const newZoom  = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(viewW / contentW, viewH / contentH)))
-  const centerX  = (minX + maxX) / 2
-  const centerY  = (minY + maxY) / 2
-
-  setZoom(newZoom)
-  setPan({ x: -centerX, y: -centerY })
-}
-
-  const contentW = maxX - minX + PADDING * 2
-  const contentH = maxY - minY + PADDING * 2
-  const viewW    = window.innerWidth
-  const viewH    = window.innerHeight - 53
-
-  const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(viewW / contentW, viewH / contentH)))
-  const centerX = (minX + maxX) / 2
-  const centerY = (minY + maxY) / 2
-
-  setZoom(newZoom)
-  setPan({ x: -centerX, y: -centerY })
-}
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -355,7 +338,6 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
 
   const handleCardClick = (post: Post) => {
     if (displayMode) {
-      // Display mode: toggle focus/show-only
       setFocusedPost((prev) => prev?.id === post.id ? null : post)
     } else {
       bringToFront(post.id)
@@ -407,7 +389,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
               <button onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.2))}>－</button>
               <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>↺</button>
             </div>
-            <button className="upload-btn" onClick={fitAll}>⊡</button>
+            <button className="upload-btn" onClick={fitAll} title="Visa alla">⊡</button>
             <button className="upload-btn" onClick={toggleFullscreen}>⛶</button>
           </div>
         </header>
@@ -429,8 +411,8 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
           {posts.map((post) => {
             const base  = basePosition(post.id)
             const live  = livePositions[post.id]
-            const initX = live?.x ?? post.pos_x ?? base.x
-            const initY = live?.y ?? post.pos_y ?? base.y
+            const initX = live?.x ?? (post.pos_x !== null && post.pos_x !== undefined ? post.pos_x : base.x)
+            const initY = live?.y ?? (post.pos_y !== null && post.pos_y !== undefined ? post.pos_y : base.y)
             const w     = liveSizes[post.id] ?? post.card_size ?? aspectW(post.file_type)
             const z     = zOrders[post.id] ?? 1
 
@@ -455,7 +437,6 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         </div>
       </div>
 
-      {/* FILE DRAG OVERLAY */}
       {isFileDrag && (
         <div className="drop-overlay">
           <div className="drop-box">
@@ -466,7 +447,6 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         </div>
       )}
 
-      {/* LIGHTBOX – normal mode */}
       {selectedPost && !displayMode && (
         <div className="lightbox" onClick={() => setSelectedPost(null)}>
           <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
@@ -487,7 +467,6 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         </div>
       )}
 
-      {/* SHOW ONLY – display mode fullscreen focus */}
       {focusedPost && displayMode && (
         <div className="show-only" onClick={() => setFocusedPost(null)}>
           {focusedPost.file_type === 'image'
@@ -495,7 +474,6 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
             ? <img src={focusedPost.file_url} alt={focusedPost.caption ?? ''} />
             : <video src={focusedPost.file_url} autoPlay loop playsInline muted />
           }
-          
           <div className="show-only-hint">Klicka för att stänga</div>
         </div>
       )}
@@ -589,8 +567,6 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         }
         .lb-user    { font-size: 13px; font-weight: 700; color: #111; }
         .lb-caption { font-size: 12px; color: #777; }
-
-        /* SHOW ONLY */
         .show-only {
           position: fixed; inset: 0; z-index: 400;
           background: #000;
@@ -601,20 +577,8 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
         .show-only img, .show-only video {
           max-width: 100%; max-height: 100%;
-          object-fit: contain;
-          display: block;
+          object-fit: contain; display: block;
         }
-        .show-only-label {
-          position: absolute; bottom: 40px; left: 50%;
-          transform: translateX(-50%);
-          display: flex; flex-direction: column; align-items: center; gap: 6px;
-          background: rgba(0,0,0,.5);
-          backdrop-filter: blur(8px);
-          border-radius: 12px;
-          padding: 12px 24px;
-        }
-        .show-only-user    { font-size: 16px; font-weight: 700; color: #fff; }
-        .show-only-caption { font-size: 13px; color: rgba(255,255,255,.7); }
         .show-only-hint {
           position: absolute; top: 20px; right: 24px;
           font-size: 11px; color: rgba(255,255,255,.3);
@@ -674,34 +638,34 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
     }
   }
 
-const onCardPointerDown = (e: React.PointerEvent) => {
-  if (resizing.current) return
-  if ((e.target as HTMLElement).classList.contains('resize-handle')) return
-  e.currentTarget.setPointerCapture(e.pointerId)
-  dragging.current   = true
-  dragStartX.current = e.clientX - posX.current
-  dragStartY.current = e.clientY - posY.current
-}
+  const onCardPointerDown = (e: React.PointerEvent) => {
+    if (resizing.current) return
+    if ((e.target as HTMLElement).classList.contains('resize-handle')) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dragging.current   = true
+    dragStartX.current = e.clientX - posX.current
+    dragStartY.current = e.clientY - posY.current
+  }
 
   const onCardPointerMove = (e: React.PointerEvent) => {
-    if (!dragging.current) return
+    if (!dragging.current || displayMode) return
     posX.current = e.clientX - dragStartX.current
     posY.current = e.clientY - dragStartY.current
     setCardTransform(posX.current, posY.current)
     onDragging(posX.current, posY.current)
   }
 
-const onCardPointerUp = () => {
-  if (!dragging.current) return
-  dragging.current = false
-  const dx = posX.current - initX
-  const dy = posY.current - initY
-  if (Math.hypot(dx, dy) < 6) {
-    onClick()
-  } else if (!displayMode) {
-    onMoved(dx, dy)
+  const onCardPointerUp = () => {
+    if (!dragging.current) return
+    dragging.current = false
+    const dx = posX.current - initX
+    const dy = posY.current - initY
+    if (Math.hypot(dx, dy) < 6) {
+      onClick()
+    } else if (!displayMode) {
+      onMoved(dx, dy)
+    }
   }
-}
 
   const onResizePointerDown = (e: React.PointerEvent) => {
     if (displayMode) return

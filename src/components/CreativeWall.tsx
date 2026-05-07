@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { motion } from 'framer-motion'
 import { supabase } from '@/lib/supabase'
 import { Post } from '@/types'
 
@@ -32,6 +31,39 @@ function debounce<T extends (...args: Parameters<T>) => void>(fn: T, ms: number)
   }
 }
 
+// Find an empty spot that doesn't overlap existing cards
+function findEmptySpot(posts: Post[]): { x: number; y: number } {
+  const W = 260
+  const H = 340
+  const PADDING = 30
+  const candidates = [
+    { x: 0, y: 0 },
+    { x: 320, y: 0 },
+    { x: -320, y: 0 },
+    { x: 0, y: 380 },
+    { x: 0, y: -380 },
+    { x: 320, y: 380 },
+    { x: -320, y: 380 },
+    { x: 320, y: -380 },
+    { x: -320, y: -380 },
+    { x: 640, y: 0 },
+    { x: -640, y: 0 },
+  ]
+  for (const c of candidates) {
+    const overlaps = posts.some((p) => {
+      const px = p.pos_x || basePosition(p.id).x
+      const py = p.pos_y || basePosition(p.id).y
+      return (
+        Math.abs(px - c.x) < W + PADDING &&
+        Math.abs(py - c.y) < H + PADDING
+      )
+    })
+    if (!overlaps) return c
+  }
+  // Fallback: offset from last card
+  return { x: Math.random() * 400 - 200, y: Math.random() * 400 - 200 }
+}
+
 const MIN_ZOOM = 0.2
 const MAX_ZOOM = 3
 
@@ -57,6 +89,15 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
   const panStart        = useRef({ x: 0, y: 0 })
   const panOrigin       = useRef({ x: 0, y: 0 })
   const stageRef        = useRef<HTMLDivElement>(null)
+
+  // z-order: higher = on top
+  const [zOrders, setZOrders] = useState<Record<string, number>>({})
+  const zCounter              = useRef(1)
+
+  const bringToFront = (id: string) => {
+    zCounter.current++
+    setZOrders((prev) => ({ ...prev, [id]: zCounter.current }))
+  }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const savePosition = useCallback(
@@ -87,7 +128,22 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
       .channel('wall-feed')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, (payload) => {
         const p = payload.new as Post
-        setPosts((prev) => prev.some((x) => x.id === p.id) ? prev : [p, ...prev])
+        setPosts((prev) => {
+          if (prev.some((x) => x.id === p.id)) return prev
+          // Place new card in empty spot
+          const spot = findEmptySpot(prev)
+          const newPost = { ...p, pos_x: spot.x, pos_y: spot.y }
+          // Save position to DB
+          fetch(`/api/posts/${p.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pos_x: spot.x, pos_y: spot.y }),
+          })
+          // Bring to front
+          zCounter.current++
+          setZOrders((z) => ({ ...z, [p.id]: zCounter.current }))
+          return [newPost, ...prev]
+        })
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -282,6 +338,7 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
             const initX = post.pos_x || base.x
             const initY = post.pos_y || base.y
             const w     = post.card_size || aspectW(post.file_type)
+            const z     = zOrders[post.id] ?? 1
 
             return (
               <DraggableCard
@@ -290,9 +347,10 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
                 initX={initX}
                 initY={initY}
                 width={w}
-                onMoved={(dx, dy) => handleMoved(post, dx, dy)}
+                zIndex={z}
+                onMoved={(dx, dy) => { bringToFront(post.id); handleMoved(post, dx, dy) }}
                 onResized={(newW) => handleResized(post, newW)}
-                onClick={() => setSelectedPost(post)}
+                onClick={() => { bringToFront(post.id); setSelectedPost(post) }}
               />
             )
           })}
@@ -428,12 +486,13 @@ interface CardProps {
   initX: number
   initY: number
   width: number
+  zIndex: number
   onMoved: (dx: number, dy: number) => void
   onResized: (newW: number) => void
   onClick: () => void
 }
 
-function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick }: CardProps) {
+function DraggableCard({ post, initX, initY, width, zIndex, onMoved, onResized, onClick }: CardProps) {
   const resizing    = useRef(false)
   const startX      = useRef(0)
   const startW      = useRef(0)
@@ -445,7 +504,6 @@ function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick 
   const cardRef     = useRef<HTMLElement>(null)
   const aspectClass = post.file_type === 'video' ? 'aspect-video' : 'aspect-[4/5]'
 
-  // Sync if initX/initY changes from outside
   useEffect(() => { posX.current = initX }, [initX])
   useEffect(() => { posY.current = initY }, [initY])
 
@@ -461,7 +519,7 @@ function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick 
     if (resizing.current) return
     if ((e.target as HTMLElement).classList.contains('resize-handle')) return
     e.currentTarget.setPointerCapture(e.pointerId)
-    dragging.current = true
+    dragging.current   = true
     dragStartX.current = e.clientX - posX.current
     dragStartY.current = e.clientY - posY.current
   }
@@ -473,7 +531,7 @@ function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick 
     setCardTransform()
   }
 
-  const onCardPointerUp = (e: React.PointerEvent) => {
+  const onCardPointerUp = () => {
     if (!dragging.current) return
     dragging.current = false
     const dx = posX.current - initX
@@ -506,7 +564,16 @@ function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick 
     <article
       ref={cardRef as React.RefObject<HTMLElement>}
       className="wall-card"
-      style={{ width, position: 'absolute', left: '50%', top: '50%', marginLeft: -width / 2, marginTop: -100, transform: `translate(${initX}px, ${initY}px)` }}
+      style={{
+        width,
+        position: 'absolute',
+        left: '50%',
+        top: '50%',
+        marginLeft: -width / 2,
+        marginTop: -100,
+        transform: `translate(${initX}px, ${initY}px)`,
+        zIndex,
+      }}
       onPointerDown={onCardPointerDown}
       onPointerMove={onCardPointerMove}
       onPointerUp={onCardPointerUp}
@@ -535,10 +602,10 @@ function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick 
           cursor: grab; border-radius: 22px; overflow: visible;
           background: #fff; border: 1px solid rgba(0,0,0,.08);
           box-shadow: 0 4px 20px rgba(0,0,0,.13), 0 1px 4px rgba(0,0,0,.06);
-          user-select: none; z-index: 1; touch-action: none;
+          user-select: none; touch-action: none;
         }
-        .wall-card:active { cursor: grabbing; z-index: 50; }
-        .wall-card:hover  { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); z-index: 50; }
+        .wall-card:active { cursor: grabbing; }
+        .wall-card:hover  { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
         .card-media img, .card-media video {
           width: 100%; height: 100%; object-fit: cover; display: block;

@@ -304,6 +304,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
   const PADDING = 100
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  }
 
   posts.forEach((p) => {
     const base = basePosition(p.id)

@@ -322,11 +322,24 @@ export default function CreativeWall({ initialPosts, uploaderName }: Props) {
             onChange={(e) => { if (e.target.files) uploadFiles(e.target.files); e.target.value = '' }}
           />
           <div className="zoom-controls">
-            <button onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.2))}>＋</button>
-            <span>{Math.round(zoom * 100)}%</span>
-            <button onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.2))}>－</button>
-            <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>↺</button>
-          </div>
+  <button onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.2))}>＋</button>
+  <span>{Math.round(zoom * 100)}%</span>
+  <button onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.2))}>－</button>
+  <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>↺</button>
+</div>
+
+<button
+  className="upload-btn"
+  onClick={() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen()
+    } else {
+      document.exitFullscreen()
+    }
+  }}
+>
+  ⛶
+</button>
         </div>
       </header>
 

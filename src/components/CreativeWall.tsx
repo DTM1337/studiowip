@@ -300,7 +300,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
 
   const fitAll = () => {
   if (posts.length === 0) return
-  const PADDING = 100
+  const PADDING = 80
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
 
   posts.forEach((p) => {
@@ -310,14 +310,17 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
     const w    = p.card_size || aspectW(p.file_type)
     const h    = p.file_type === 'video' ? w * 9 / 16 : w * 5 / 4
 
-    // Canvas är 1400x1200, kort placeras med left:50%(=700), top:50%(=600), marginTop:-100
-    const canvasX = 700 + posX
-    const canvasY = 500 + posY + h / 2
+    // left:50%=700, marginLeft:-w/2, translateX:posX
+    // top:50%=600, marginTop:-100, translateY:posY
+    const left   = 700 - w / 2 + posX
+    const top    = 600 - 100 + posY
+    const right  = left + w
+    const bottom = top + h
 
-    minX = Math.min(minX, canvasX - w / 2)
-    maxX = Math.max(maxX, canvasX + w / 2)
-    minY = Math.min(minY, canvasY - h / 2)
-    maxY = Math.max(maxY, canvasY + h / 2)
+    minX = Math.min(minX, left)
+    maxX = Math.max(maxX, right)
+    minY = Math.min(minY, top)
+    maxY = Math.max(maxY, bottom)
   })
 
   const contentW = maxX - minX + PADDING * 2
@@ -325,11 +328,10 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
   const viewW    = window.innerWidth
   const viewH    = window.innerHeight - 53
 
-  const newZoom     = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(viewW / contentW, viewH / contentH)))
-  const centerX     = (minX + maxX) / 2
-  const centerY     = (minY + maxY) / 2
+  const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(viewW / contentW, viewH / contentH)))
+  const centerX = (minX + maxX) / 2
+  const centerY = (minY + maxY) / 2
 
-  // Canvasens mittpunkt är 700, 600
   setZoom(newZoom)
   setPan({ x: -(centerX - 700), y: -(centerY - 600) })
 }

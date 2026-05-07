@@ -10,9 +10,21 @@ export default function Home() {
   const [checking,     setChecking]     = useState(true)
   const [posts,        setPosts]        = useState<Post[]>([])
   const [loadingPosts, setLoadingPosts] = useState(false)
-  const [uploaderName, setUploaderName] = useState('Anonym person 👀')
+  const [uploaderName, setUploaderName] = useState('Anonymous')
+  const [displayMode,  setDisplayMode]  = useState(false)
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const isDisplay = params.get('display') === 'true'
+    setDisplayMode(isDisplay)
+
+    if (isDisplay) {
+      // Display mode – skip auth, fetch directly
+      fetchPosts()
+      setChecking(false)
+      return
+    }
+
     const stored = localStorage.getItem('showandtell_auth')
     const name   = localStorage.getItem('showandtell_name')
     if (stored === '1') { setAuthed(true); fetchPosts() }
@@ -34,8 +46,6 @@ export default function Home() {
 
   if (checking) return null
 
-  if (!authed) return <PasswordGate onSuccess={handleAuth} />
-
   if (loadingPosts) return (
     <div style={{ minHeight:'100vh', background:'#efefef', display:'flex',
                   alignItems:'center', justifyContent:'center',
@@ -44,5 +54,7 @@ export default function Home() {
     </div>
   )
 
-  return <CreativeWall initialPosts={posts} uploaderName={uploaderName} />
+  if (!authed && !displayMode) return <PasswordGate onSuccess={handleAuth} />
+
+  return <CreativeWall initialPosts={posts} uploaderName={uploaderName} displayMode={displayMode} />
 }

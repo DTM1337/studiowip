@@ -299,34 +299,40 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
   }
 
   const fitAll = () => {
-    if (posts.length === 0) return
-    const PADDING = 100
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  if (posts.length === 0) return
+  const PADDING = 100
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
 
-    posts.forEach((p) => {
-      const base = basePosition(p.id)
-      const x = (p.pos_x !== null && p.pos_x !== undefined) ? p.pos_x : base.x
-      const y = (p.pos_y !== null && p.pos_y !== undefined) ? p.pos_y : base.y
-      const w = p.card_size || aspectW(p.file_type)
-      const h = p.file_type === 'video' ? w * 9 / 16 : w * 5 / 4
+  posts.forEach((p) => {
+    const base = basePosition(p.id)
+    const posX = (p.pos_x !== null && p.pos_x !== undefined) ? p.pos_x : base.x
+    const posY = (p.pos_y !== null && p.pos_y !== undefined) ? p.pos_y : base.y
+    const w    = p.card_size || aspectW(p.file_type)
+    const h    = p.file_type === 'video' ? w * 9 / 16 : w * 5 / 4
 
-      minX = Math.min(minX, x - w / 2)
-      maxX = Math.max(maxX, x + w / 2)
-      minY = Math.min(minY, y - 100)
-      maxY = Math.max(maxY, y - 100 + h)
-    })
+    // Canvas är 1400x1200, kort placeras med left:50%(=700), top:50%(=600), marginTop:-100
+    const canvasX = 700 + posX
+    const canvasY = 500 + posY + h / 2
 
-    const contentW = maxX - minX + PADDING * 2
-    const contentH = maxY - minY + PADDING * 2
-    const viewW    = window.innerWidth
-    const viewH    = window.innerHeight - 53
-    const newZoom  = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(viewW / contentW, viewH / contentH)))
-    const centerX  = (minX + maxX) / 2
-    const centerY  = (minY + maxY) / 2
+    minX = Math.min(minX, canvasX - w / 2)
+    maxX = Math.max(maxX, canvasX + w / 2)
+    minY = Math.min(minY, canvasY - h / 2)
+    maxY = Math.max(maxY, canvasY + h / 2)
+  })
 
-    setZoom(newZoom)
-    setPan({ x: -centerX, y: -centerY })
-  }
+  const contentW = maxX - minX + PADDING * 2
+  const contentH = maxY - minY + PADDING * 2
+  const viewW    = window.innerWidth
+  const viewH    = window.innerHeight - 53
+
+  const newZoom     = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(viewW / contentW, viewH / contentH)))
+  const centerX     = (minX + maxX) / 2
+  const centerY     = (minY + maxY) / 2
+
+  // Canvasens mittpunkt är 700, 600
+  setZoom(newZoom)
+  setPan({ x: -(centerX - 700), y: -(centerY - 600) })
+}
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {

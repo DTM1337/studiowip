@@ -434,46 +434,82 @@ interface CardProps {
 }
 
 function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick }: CardProps) {
-  const dragDist    = useRef(0)
   const resizing    = useRef(false)
   const startX      = useRef(0)
   const startW      = useRef(0)
+  const dragging    = useRef(false)
+  const dragStartX  = useRef(0)
+  const dragStartY  = useRef(0)
+  const posX        = useRef(initX)
+  const posY        = useRef(initY)
+  const cardRef     = useRef<HTMLElement>(null)
   const aspectClass = post.file_type === 'video' ? 'aspect-video' : 'aspect-[4/5]'
 
-  const onResizeMouseDown = (e: React.MouseEvent) => {
+  // Sync if initX/initY changes from outside
+  useEffect(() => { posX.current = initX }, [initX])
+  useEffect(() => { posY.current = initY }, [initY])
+
+  const setCardTransform = () => {
+    if (cardRef.current) {
+      cardRef.current.style.transform = `translate(${posX.current}px, ${posY.current}px)`
+    }
+  }
+
+  useEffect(() => { setCardTransform() })
+
+  const onCardPointerDown = (e: React.PointerEvent) => {
+    if (resizing.current) return
+    if ((e.target as HTMLElement).classList.contains('resize-handle')) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dragging.current = true
+    dragStartX.current = e.clientX - posX.current
+    dragStartY.current = e.clientY - posY.current
+  }
+
+  const onCardPointerMove = (e: React.PointerEvent) => {
+    if (!dragging.current) return
+    posX.current = e.clientX - dragStartX.current
+    posY.current = e.clientY - dragStartY.current
+    setCardTransform()
+  }
+
+  const onCardPointerUp = (e: React.PointerEvent) => {
+    if (!dragging.current) return
+    dragging.current = false
+    const dx = posX.current - initX
+    const dy = posY.current - initY
+    if (Math.hypot(dx, dy) < 6) {
+      onClick()
+    } else {
+      onMoved(dx, dy)
+    }
+  }
+
+  const onResizePointerDown = (e: React.PointerEvent) => {
     e.stopPropagation()
     e.preventDefault()
     resizing.current = true
     startX.current   = e.clientX
     startW.current   = width
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!resizing.current) return
-      const newW = Math.max(120, Math.min(600, startW.current + ev.clientX - startX.current))
-      onResized(newW)
-    }
-    const onMouseUp = () => {
-      resizing.current = false
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup',   onMouseUp)
-    }
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup',   onMouseUp)
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
   }
 
+  const onResizePointerMove = (e: React.PointerEvent) => {
+    if (!resizing.current) return
+    const newW = Math.max(120, Math.min(600, startW.current + e.clientX - startX.current))
+    onResized(newW)
+  }
+
+  const onResizePointerUp = () => { resizing.current = false }
+
   return (
-    <motion.article
-      drag
-      dragMomentum={false}
-      dragElastic={0.06}
-      whileDrag={{ scale: 1.05, zIndex: 100 }}
-      initial={{ x: initX, y: initY }}
-      onDragStart={() => { dragDist.current = 0 }}
-      onDrag={(_, info) => { dragDist.current = Math.hypot(info.offset.x, info.offset.y) }}
-      onDragEnd={(_, info) => { onMoved(info.offset.x, info.offset.y) }}
-      onClick={() => { if (dragDist.current < 6) onClick() }}
-      style={{ width, position: 'absolute', left: '50%', top: '50%', marginLeft: -width / 2, marginTop: -100 }}
+    <article
+      ref={cardRef as React.RefObject<HTMLElement>}
       className="wall-card"
+      style={{ width, position: 'absolute', left: '50%', top: '50%', marginLeft: -width / 2, marginTop: -100, transform: `translate(${initX}px, ${initY}px)` }}
+      onPointerDown={onCardPointerDown}
+      onPointerMove={onCardPointerMove}
+      onPointerUp={onCardPointerUp}
     >
       <div className={`card-media ${aspectClass}`}>
         {post.file_type === 'image'
@@ -489,8 +525,9 @@ function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick 
 
       <div
         className="resize-handle"
-        onMouseDown={onResizeMouseDown}
-        onPointerDown={(e) => e.stopPropagation()}
+        onPointerDown={onResizePointerDown}
+        onPointerMove={onResizePointerMove}
+        onPointerUp={onResizePointerUp}
       />
 
       <style>{`
@@ -498,9 +535,9 @@ function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick 
           cursor: grab; border-radius: 22px; overflow: visible;
           background: #fff; border: 1px solid rgba(0,0,0,.08);
           box-shadow: 0 4px 20px rgba(0,0,0,.13), 0 1px 4px rgba(0,0,0,.06);
-          user-select: none; z-index: 1;
+          user-select: none; z-index: 1; touch-action: none;
         }
-        .wall-card:active { cursor: grabbing; }
+        .wall-card:active { cursor: grabbing; z-index: 50; }
         .wall-card:hover  { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); z-index: 50; }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
         .card-media img, .card-media video {
@@ -525,9 +562,10 @@ function DraggableCard({ post, initX, initY, width, onMoved, onResized, onClick 
           width: 18px; height: 18px; background: #fff;
           border: 2px solid rgba(0,0,0,.2); border-radius: 50%;
           cursor: se-resize; opacity: 0; transition: opacity .2s; z-index: 10;
+          touch-action: none;
         }
         .wall-card:hover .resize-handle { opacity: 1; }
       `}</style>
-    </motion.article>
+    </article>
   )
 }

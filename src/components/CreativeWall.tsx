@@ -632,15 +632,14 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
     }
   }
 
-  const onCardPointerDown = (e: React.PointerEvent) => {
-    if (displayMode) return
-    if (resizing.current) return
-    if ((e.target as HTMLElement).classList.contains('resize-handle')) return
-    e.currentTarget.setPointerCapture(e.pointerId)
-    dragging.current   = true
-    dragStartX.current = e.clientX - posX.current
-    dragStartY.current = e.clientY - posY.current
-  }
+const onCardPointerDown = (e: React.PointerEvent) => {
+  if (resizing.current) return
+  if ((e.target as HTMLElement).classList.contains('resize-handle')) return
+  e.currentTarget.setPointerCapture(e.pointerId)
+  dragging.current   = true
+  dragStartX.current = e.clientX - posX.current
+  dragStartY.current = e.clientY - posY.current
+}
 
   const onCardPointerMove = (e: React.PointerEvent) => {
     if (!dragging.current) return
@@ -650,17 +649,17 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
     onDragging(posX.current, posY.current)
   }
 
-  const onCardPointerUp = () => {
-    if (!dragging.current) return
-    dragging.current = false
-    const dx = posX.current - initX
-    const dy = posY.current - initY
-    if (Math.hypot(dx, dy) < 6) {
-      onClick()
-    } else {
-      onMoved(dx, dy)
-    }
+const onCardPointerUp = () => {
+  if (!dragging.current) return
+  dragging.current = false
+  const dx = posX.current - initX
+  const dy = posY.current - initY
+  if (Math.hypot(dx, dy) < 6) {
+    onClick()
+  } else if (!displayMode) {
+    onMoved(dx, dy)
   }
+}
 
   const onResizePointerDown = (e: React.PointerEvent) => {
     if (displayMode) return

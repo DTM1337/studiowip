@@ -35,12 +35,12 @@ export default function PasswordGate({ onSuccess }: Props) {
   return (
     <div className="gate-wrapper">
       <div className="gate-card">
-        <div className="gate-logo">Show &amp; Tell</div>
-        <div className="gate-sub">Vad jobbar du med?</div>
+        <div className="gate-logo">NORD STUDIO WIP</div>
+        <div className="gate-sub">hej vad jobbar du med?</div>
         <div className="gate-label">Lösenord</div>
         <input
           type="password"
-          placeholder="••••••••"
+          placeholder=""
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
@@ -49,7 +49,7 @@ export default function PasswordGate({ onSuccess }: Props) {
         />
         {error && <span className="error-msg">Fel lösenord</span>}
         <button onClick={handleSubmit} disabled={loading}>
-          {loading ? '…' : 'Gå in →'}
+          {loading ? '…' : '→'}
         </button>
       </div>
 

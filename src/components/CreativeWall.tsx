@@ -60,12 +60,16 @@ interface Props {
   initialPosts: Post[]
   uploaderName: string
   displayMode?: boolean
+  onViewChange?: (pan: { x: number; y: number }, zoom: number) => void
+  externalView?: { pan: { x: number; y: number }; zoom: number } | null
+  onSelectPost?: (postId: string | null) => void
+  externalSelectedPostId?: string | null
 }
 
 type LivePositions = Record<string, { x: number; y: number }>
 type LiveSizes = Record<string, number>
 
-export default function CreativeWall({ initialPosts, uploaderName, displayMode = false }: Props) {
+export default function CreativeWall({ initialPosts, uploaderName, displayMode = false, onViewChange, externalView, onSelectPost, externalSelectedPostId }: Props) {
   const [posts, setPosts]                 = useState<Post[]>(initialPosts)
   const [selectedPost, setSelectedPost]   = useState<Post | null>(null)
   const [focusedPost, setFocusedPost]     = useState<Post | null>(null)
@@ -86,6 +90,18 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
   const panStart        = useRef({ x: 0, y: 0 })
   const panOrigin       = useRef({ x: 0, y: 0 })
   const stageRef        = useRef<HTMLDivElement>(null)
+
+  useEffect(() => { onViewChange?.(pan, zoom) }, [pan, zoom])
+  useEffect(() => {
+    const id = selectedPost?.id ?? focusedPost?.id ?? null
+    onSelectPost?.(id)
+  }, [selectedPost, focusedPost])
+
+  useEffect(() => {
+    if (!externalView) return
+    setPan(externalView.pan)
+    setZoom(externalView.zoom)
+  }, [externalView])
 
   const [zOrders, setZOrders] = useState<Record<string, number>>({})
   const zCounter              = useRef(1)
@@ -168,21 +184,21 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
     if (!list.length) return
     setUploading(true)
     for (const file of list) {
-      const allowed = ['image/jpeg','image/png','image/gif','image/webp','video/mp4','video/quicktime']
-      if (!allowed.includes(file.type)) { alert(`Filtyp stöds ej: ${file.type}`); continue }
-      if (file.size > 50 * 1024 * 1024) { alert('Max 50MB per fil'); continue }
+      const allowed = ['image/jpeg','image/png','image/gif','image/webp','video/mp4','video/quicktime','video/mov']
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+        alert(`Filtyp stöds ej: ${file.type}`); continue
+      }
+      if (file.size > 200 * 1024 * 1024) { alert('Max 200MB per fil'); continue }
 
-      const ext      = file.name.split('.').pop() ?? 'bin'
-      const fileName = `${crypto.randomUUID()}.${ext}`
-      const fileType = file.type.startsWith('video/') ? 'video' : 'image'
-
-      const { error: storageError } = await supabase.storage
-        .from('media')
-        .upload(fileName, file, { contentType: file.type, upsert: false })
-
-      if (storageError) { alert(`Storage error: ${storageError.message}`); continue }
-
-      const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName)
+      // Send file to server — videos get transcoded to H.264 MP4
+      const form = new FormData()
+      form.append('file', file)
+      const mediaRes = await fetch('/api/upload-media', { method: 'POST', body: form })
+      if (!mediaRes.ok) {
+        const { error } = await mediaRes.json().catch(() => ({ error: 'Upload failed' }))
+        alert(`Upload error: ${error}`); continue
+      }
+      const { url: publicUrl, fileType } = await mediaRes.json()
 
       const res = await fetch('/api/upload', {
         method: 'POST',
@@ -455,25 +471,29 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         </div>
       )}
 
-      {selectedPost && !displayMode && (
-        <div className="lightbox" onClick={() => setSelectedPost(null)}>
-          <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
-            <button className="lb-delete" onClick={() => handleDelete(selectedPost)}>🗑 Ta bort</button>
-            <button className="lb-close"  onClick={() => setSelectedPost(null)}>✕ Stäng</button>
-            <div className="lb-media">
-              {selectedPost.file_type === 'image'
-                // eslint-disable-next-line @next/next/no-img-element
-                ? <img src={selectedPost.file_url} alt={selectedPost.caption ?? ''} />
-                : <video src={selectedPost.file_url} controls autoPlay loop playsInline />
-              }
-            </div>
-            <div className="lb-footer">
-              <span className="lb-user">{selectedPost.uploader_name}</span>
-              {selectedPost.caption && <span className="lb-caption">{selectedPost.caption}</span>}
-            </div>
+      {(() => {
+        const lbPost = selectedPost ?? (externalSelectedPostId ? posts.find(p => p.id === externalSelectedPostId) ?? null : null)
+        const isExternal = !selectedPost && !!externalSelectedPostId
+        if (!lbPost) return null
+        if (!isExternal && displayMode) return null
+        return (
+          <div className="lightbox" onClick={() => !isExternal && setSelectedPost(null)}>
+            {!isExternal && <button className="lb-delete" onClick={(e) => { e.stopPropagation(); handleDelete(lbPost) }}>🗑 Ta bort</button>}
+            {!isExternal && <button className="lb-close" onClick={(e) => { e.stopPropagation(); setSelectedPost(null) }}>✕ Stäng</button>}
+            {lbPost.file_type === 'image'
+              // eslint-disable-next-line @next/next/no-img-element
+              ? <img src={lbPost.file_url} alt={lbPost.caption ?? ''} />
+              : <video src={lbPost.file_url} autoPlay loop playsInline muted controls={!isExternal} />
+            }
+            {!isExternal && (lbPost.uploader_name || lbPost.caption) && (
+              <div className="lb-footer">
+                <span className="lb-user">{lbPost.uploader_name}</span>
+                {lbPost.caption && <span className="lb-caption">{lbPost.caption}</span>}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {focusedPost && displayMode && (
         <div className="show-only" onClick={() => setFocusedPost(null)}>
@@ -548,33 +568,37 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         .drop-box p  { font-size: 14px; opacity: .6; }
         .lightbox {
           position: fixed; inset: 0; z-index: 300;
+          background: #000;
           display: flex; align-items: center; justify-content: center;
-          background: rgba(0,0,0,.8); backdrop-filter: blur(10px); padding: 24px;
+          cursor: pointer;
+          animation: fadeIn .2s ease;
         }
-        .lightbox-inner {
-          position: relative; background: #fff; border-radius: 24px; overflow: hidden;
-          max-width: 900px; width: 100%; box-shadow: 0 32px 80px rgba(0,0,0,.4);
+        .lightbox img, .lightbox video {
+          display: block; max-width: 100%; max-height: 100vh;
+          object-fit: contain; pointer-events: none;
         }
         .lb-close {
-          position: absolute; top: 14px; right: 14px; z-index: 10;
-          background: #111; color: #fff; border: none; border-radius: 20px;
+          position: fixed; top: 20px; right: 24px; z-index: 10;
+          background: rgba(255,255,255,.15); color: #fff; border: none; border-radius: 20px;
           padding: 7px 16px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
+          backdrop-filter: blur(8px);
         }
         .lb-delete {
-          position: absolute; top: 14px; left: 14px; z-index: 10;
-          background: #e03; color: #fff; border: none; border-radius: 20px;
+          position: fixed; top: 20px; left: 24px; z-index: 10;
+          background: rgba(220,0,51,.8); color: #fff; border: none; border-radius: 20px;
           padding: 7px 16px; font-size: 12px; font-weight: 600;
           cursor: pointer; font-family: inherit; transition: opacity .15s;
+          backdrop-filter: blur(8px);
         }
         .lb-delete:hover { opacity: .82; }
-        .lb-media { background: #000; }
-        .lb-media img, .lb-media video { display: block; width: 100%; max-height: 80vh; object-fit: contain; }
         .lb-footer {
-          padding: 16px 20px; display: flex; gap: 10px; align-items: baseline;
-          border-top: 1px solid rgba(0,0,0,.08);
+          position: fixed; bottom: 0; left: 0; right: 0;
+          padding: 20px 28px; display: flex; gap: 10px; align-items: baseline;
+          background: linear-gradient(transparent, rgba(0,0,0,.7));
+          pointer-events: none;
         }
-        .lb-user    { font-size: 13px; font-weight: 700; color: #111; }
-        .lb-caption { font-size: 12px; color: #777; }
+        .lb-user    { font-size: 14px; font-weight: 700; color: #fff; }
+        .lb-caption { font-size: 13px; color: rgba(255,255,255,.7); }
         .show-only {
           position: fixed; inset: 0; z-index: 400;
           background: #000;
@@ -753,7 +777,7 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
         .wall-card:active { cursor: grabbing; }
         .wall-card:hover  { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); }
         .wall-card.display-mode { cursor: pointer; }
-        .wall-card.is-live { outline: 2px solid #4a9eff; outline-offset: 2px; }
+        .wall-card.is-live:not(.display-mode) { outline: 2px solid #4a9eff; outline-offset: 2px; }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
         .card-media img, .card-media video {
           width: 100%; height: 100%; object-fit: cover; display: block;

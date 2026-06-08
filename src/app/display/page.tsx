@@ -39,7 +39,37 @@ export default function DisplayPage() {
     return () => { supabase.removeChannel(ch) }
   }, [])
 
-  const is90or270 = rotation === 90 || rotation === 270
+  useEffect(() => {
+    const el = document.documentElement
+    const is90or270 = rotation === 90 || rotation === 270
+    if (rotation === 0) {
+      el.style.transform = ''
+      el.style.width = ''
+      el.style.height = ''
+      el.style.position = ''
+      el.style.top = ''
+      el.style.left = ''
+      el.style.overflow = ''
+    } else {
+      el.style.transform = `rotate(${rotation}deg)`
+      el.style.transformOrigin = '50% 50%'
+      el.style.position = 'absolute'
+      el.style.overflow = 'hidden'
+      if (is90or270) {
+        const vw = window.innerWidth
+        const vh = window.innerHeight
+        el.style.width = `${vh}px`
+        el.style.height = `${vw}px`
+        el.style.top = `${(vh - vw) / 2}px`
+        el.style.left = `${(vw - vh) / 2}px`
+      } else {
+        el.style.width = ''
+        el.style.height = ''
+        el.style.top = '0'
+        el.style.left = '0'
+      }
+    }
+  }, [rotation])
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#efefef', display: 'flex',
@@ -55,19 +85,8 @@ export default function DisplayPage() {
       {showRulers && (
         <Rulers pan={externalView?.pan ?? { x: 0, y: 0 }} zoom={externalView?.zoom ?? 1} />
       )}
-      <div style={{
-        width: is90or270 ? '100vh' : '100vw',
-        height: is90or270 ? '100vw' : '100vh',
-        transform: `rotate(${rotation}deg)`,
-        transformOrigin: 'center center',
-        position: 'fixed',
-        top: is90or270 ? `calc((100vh - 100vw) / 2)` : 0,
-        left: is90or270 ? `calc((100vw - 100vh) / 2)` : 0,
-        overflow: 'hidden',
-      }}>
-        <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
-          externalView={externalView} externalSelectedPostId={externalSelectedPostId} />
-      </div>
+      <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
+        externalView={externalView} externalSelectedPostId={externalSelectedPostId} />
     </>
   )
 }

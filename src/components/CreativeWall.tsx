@@ -184,15 +184,25 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
     if (!list.length) return
     setUploading(true)
     for (const file of list) {
-      const allowed = ['image/jpeg','image/png','image/gif','image/webp','video/mp4','video/quicktime','video/mov']
       if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
         alert(`Filtyp stöds ej: ${file.type}`); continue
       }
-      if (file.size > 200 * 1024 * 1024) { alert('Max 200MB per fil'); continue }
+      if (file.size > 500 * 1024 * 1024) { alert('Max 500MB per fil'); continue }
 
-      // Send file to server — videos get transcoded to H.264 MP4
+      let fileToUpload = file
+      const isVideo = file.type.startsWith('video/')
+
+      if (isVideo) {
+        try {
+          const { transcodeToH264 } = await import('@/lib/transcodeVideo')
+          fileToUpload = await transcodeToH264(file)
+        } catch (e) {
+          console.warn('Transcoding failed, uploading original:', e)
+        }
+      }
+
       const form = new FormData()
-      form.append('file', file)
+      form.append('file', fileToUpload)
       const mediaRes = await fetch('/api/upload-media', { method: 'POST', body: form })
       if (!mediaRes.ok) {
         const { error } = await mediaRes.json().catch(() => ({ error: 'Upload failed' }))

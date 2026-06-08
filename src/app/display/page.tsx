@@ -39,37 +39,13 @@ export default function DisplayPage() {
     return () => { supabase.removeChannel(ch) }
   }, [])
 
+  const [dims, setDims] = useState({ vw: 0, vh: 0 })
   useEffect(() => {
-    const el = document.documentElement
-    const is90or270 = rotation === 90 || rotation === 270
-    if (rotation === 0) {
-      el.style.transform = ''
-      el.style.width = ''
-      el.style.height = ''
-      el.style.position = ''
-      el.style.top = ''
-      el.style.left = ''
-      el.style.overflow = ''
-    } else {
-      el.style.transform = `rotate(${rotation}deg)`
-      el.style.transformOrigin = '50% 50%'
-      el.style.position = 'absolute'
-      el.style.overflow = 'hidden'
-      if (is90or270) {
-        const vw = window.innerWidth
-        const vh = window.innerHeight
-        el.style.width = `${vh}px`
-        el.style.height = `${vw}px`
-        el.style.top = `${(vh - vw) / 2}px`
-        el.style.left = `${(vw - vh) / 2}px`
-      } else {
-        el.style.width = ''
-        el.style.height = ''
-        el.style.top = '0'
-        el.style.left = '0'
-      }
-    }
-  }, [rotation])
+    const update = () => setDims({ vw: window.innerWidth, vh: window.innerHeight })
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#efefef', display: 'flex',
@@ -79,14 +55,34 @@ export default function DisplayPage() {
     </div>
   )
 
+  const is90or270 = rotation === 90 || rotation === 270
+  const { vw, vh } = dims
+
+  // For 90/270°: content box is vh×vw (portrait), rotated to fill vw×vh screen
+  const boxW = is90or270 ? vh : vw
+  const boxH = is90or270 ? vw : vh
+  const offsetTop  = is90or270 ? (vh - vw) / 2 : 0
+  const offsetLeft = is90or270 ? (vw - vh) / 2 : 0
+
   return (
     <>
       <style>{`nextjs-portal { display: none !important; }`}</style>
       {showRulers && (
         <Rulers pan={externalView?.pan ?? { x: 0, y: 0 }} zoom={externalView?.zoom ?? 1} />
       )}
-      <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
-        externalView={externalView} externalSelectedPostId={externalSelectedPostId} />
+      <div style={{
+        position: 'fixed',
+        top: offsetTop,
+        left: offsetLeft,
+        width: boxW || '100vw',
+        height: boxH || '100vh',
+        transform: rotation ? `rotate(${rotation}deg)` : undefined,
+        transformOrigin: 'center center',
+        overflow: 'hidden',
+      }}>
+        <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
+          externalView={externalView} externalSelectedPostId={externalSelectedPostId} />
+      </div>
     </>
   )
 }

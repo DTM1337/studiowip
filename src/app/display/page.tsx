@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import CreativeWall from '@/components/CreativeWall'
 import Rulers from '@/components/Rulers'
 import { Post } from '@/types'
+import { supabase } from '@/lib/supabase'
+import { CHANNEL } from '@/lib/displayChannel'
 
 export default function DisplayPage() {
   const [posts, setPosts] = useState<Post[]>([])
@@ -21,22 +23,20 @@ export default function DisplayPage() {
   }, [])
 
   useEffect(() => {
-    const es = new EventSource('/api/control')
-    es.onmessage = (e) => {
-      try {
-        const cmd = JSON.parse(e.data)
-        if (cmd.action === 'view-sync') {
-          setExternalView({ pan: cmd.pan, zoom: cmd.zoom })
-        } else if (cmd.action === 'select-post') {
-          setExternalSelectedPostId(cmd.postId ?? null)
-        } else if (cmd.action === 'rotate') {
-          setRotation(r => (r + 90) % 360)
-        } else if (cmd.action === 'toggle-rulers') {
-          setShowRulers(r => !r)
-        }
-      } catch {}
-    }
-    return () => es.close()
+    const ch = supabase.channel(CHANNEL)
+    ch.on('broadcast', { event: 'cmd' }, ({ payload }) => {
+      const cmd = payload as { action: string; [key: string]: unknown }
+      if (cmd.action === 'view-sync') {
+        setExternalView({ pan: cmd.pan as { x: number; y: number }, zoom: cmd.zoom as number })
+      } else if (cmd.action === 'select-post') {
+        setExternalSelectedPostId((cmd.postId as string) ?? null)
+      } else if (cmd.action === 'rotate') {
+        setRotation(r => (r + 90) % 360)
+      } else if (cmd.action === 'toggle-rulers') {
+        setShowRulers(r => !r)
+      }
+    }).subscribe()
+    return () => { supabase.removeChannel(ch) }
   }, [])
 
   const is90or270 = rotation === 90 || rotation === 270
@@ -51,15 +51,9 @@ export default function DisplayPage() {
 
   return (
     <>
-      <style>{`
-        #__next-build-watcher,
-        nextjs-portal { display: none !important; }
-      `}</style>
+      <style>{`nextjs-portal { display: none !important; }`}</style>
       {showRulers && (
-        <Rulers
-          pan={externalView?.pan ?? { x: 0, y: 0 }}
-          zoom={externalView?.zoom ?? 1}
-        />
+        <Rulers pan={externalView?.pan ?? { x: 0, y: 0 }} zoom={externalView?.zoom ?? 1} />
       )}
       <div style={{
         width: is90or270 ? '100vh' : '100vw',
@@ -71,7 +65,8 @@ export default function DisplayPage() {
         left: is90or270 ? `calc((100vw - 100vh) / 2)` : 0,
         overflow: 'hidden',
       }}>
-        <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true} externalView={externalView} externalSelectedPostId={externalSelectedPostId} />
+        <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
+          externalView={externalView} externalSelectedPostId={externalSelectedPostId} />
       </div>
     </>
   )

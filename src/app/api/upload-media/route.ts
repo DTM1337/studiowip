@@ -35,9 +35,11 @@ export async function POST(req: NextRequest) {
           .outputOptions([
             '-crf 23',
             '-preset fast',
-            '-pix_fmt yuv420p',   // Samsung TV compatibility
-            '-movflags faststart', // stream-friendly
-            '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', // ensure even dimensions
+            '-pix_fmt yuv420p',
+            '-movflags faststart',
+            // Bake rotation into pixels (ffmpeg auto-rotates on decode), clear metadata
+            '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+            '-metadata:s:v:0', 'rotate=0',
           ])
           .on('end', () => resolve())
           .on('error', (err) => reject(err))

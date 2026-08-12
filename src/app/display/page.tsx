@@ -42,29 +42,55 @@ export default function DisplayPage() {
   useEffect(() => {
     const html = document.documentElement
     const body = document.body
-    const vw = window.innerWidth
-    const vh = window.innerHeight
+    const styleEl = document.createElement('style')
+    document.head.appendChild(styleEl)
 
-    if (rotation === 0) {
+    const apply = () => {
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+
       html.style.cssText = ''
       body.style.cssText = ''
-      return
+      styleEl.textContent = ''
+      if (rotation === 0) return
+
+      const quarter = rotation === 90 || rotation === 270
+      // Page box dimensions before rotation: swapped for 90/270.
+      const W = quarter ? vh : vw
+      const H = quarter ? vw : vh
+
+      // transform-origin 0 0, rotate() maps (x,y):
+      //   90°  → (-y, x)  ⇒ bbox x ∈ [-H,0] ⇒ shift right by H (= vw)
+      //   270° → ( y,-x)  ⇒ bbox y ∈ [-W,0] ⇒ shift down  by W (= vh)
+      //   180° → (-x,-y)  ⇒ shift right by W and down by H
+      const transforms: Record<number, string> = {
+        90:  `translateX(${H}px) rotate(90deg)`,
+        180: `translateX(${W}px) translateY(${H}px) rotate(180deg)`,
+        270: `translateY(${W}px) rotate(270deg)`,
+      }
+
+      html.style.transformOrigin = '0 0'
+      html.style.transform = transforms[rotation]
+      html.style.width = `${W}px`
+      html.style.height = `${H}px`
+      html.style.overflow = 'hidden'
+      body.style.overflow = 'hidden'
+
+      // CSS vw/vh units always resolve against the real viewport, not the
+      // resized <html> box — so every 100vw/100vh rule has to be overridden
+      // with the rotated page dimensions or the layout overflows and clips.
+      styleEl.textContent = `
+        html, body { width: ${W}px !important; height: ${H}px !important; }
+        .wall-root { width: ${W}px !important; height: ${H}px !important; min-height: ${H}px !important; }
+        .wall-stage { width: ${W}px !important; height: ${H}px !important; }
+      `
     }
 
-    const transforms: Record<number, string> = {
-      90:  `rotate(90deg) translateX(0) translateY(-${vh}px)`,
-      180: `rotate(180deg) translateX(-${vw}px) translateY(-${vh}px)`,
-      270: `rotate(270deg) translateX(-${vw}px) translateY(0)`,
-    }
-
-    html.style.transformOrigin = '0 0'
-    html.style.transform = transforms[rotation] ?? ''
-    html.style.width = (rotation === 90 || rotation === 270) ? `${vh}px` : `${vw}px`
-    html.style.height = (rotation === 90 || rotation === 270) ? `${vw}px` : `${vh}px`
-    html.style.overflow = 'hidden'
-    body.style.overflow = 'hidden'
-
+    apply()
+    window.addEventListener('resize', apply)
     return () => {
+      window.removeEventListener('resize', apply)
+      styleEl.remove()
       html.style.cssText = ''
       body.style.cssText = ''
     }

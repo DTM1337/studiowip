@@ -55,10 +55,14 @@ export default function DisplayPage() {
   // ancestor are fixed relative to that ancestor, so everything rotates together.
   let wrapperStyle: React.CSSProperties = { position: 'fixed', inset: 0, overflow: 'hidden' }
   if (rotation !== 0 && vw > 0) {
+    // Verified math (transform-origin: 0 0, landscape vw×vh → portrait vh×vw):
+    // rotate(90deg):  (x,y)→(-y,x)  → content at x:-vh→0, y:0→vw → need translateX(vh)
+    // rotate(270deg): (x,y)→(y,-x)  → content at x:0→vh,  y:-vw→0 → need translateY(vw)
+    // rotate(180deg): (x,y)→(-x,-y) → need translateX(vw)+translateY(vh)
     const transforms: Record<number, string> = {
-      90:  `translateY(${vw}px) rotate(90deg)`,
+      90:  `translateX(${vh}px) rotate(90deg)`,
       180: `translateX(${vw}px) translateY(${vh}px) rotate(180deg)`,
-      270: `translateX(${vh}px) rotate(270deg)`,
+      270: `translateY(${vw}px) rotate(270deg)`,
     }
     wrapperStyle = {
       position: 'fixed',

@@ -7,6 +7,19 @@ import { Post } from '@/types'
 import { supabase } from '@/lib/supabase'
 import { CHANNEL } from '@/lib/displayChannel'
 
+type LockType = 'landscape-primary' | 'landscape-secondary' | 'portrait-primary' | 'portrait-secondary'
+
+const ORIENTATION_MAP: Record<number, LockType> = {
+  0:   'landscape-primary',
+  90:  'portrait-primary',
+  180: 'landscape-secondary',
+  270: 'portrait-secondary',
+}
+
+function getOrient() {
+  return screen.orientation as ScreenOrientation & { lock?: (o: LockType) => Promise<void>; unlock?: () => void }
+}
+
 export default function DisplayPage() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
@@ -26,6 +39,10 @@ export default function DisplayPage() {
   useEffect(() => {
     const onChange = () => setIsFullscreen(!!document.fullscreenElement)
     document.addEventListener('fullscreenchange', onChange)
+    // Samsung Tizen kiosk is always "fullscreen" — treat it as such
+    if (window.navigator.userAgent.includes('SMART-TV') || window.navigator.userAgent.includes('Tizen')) {
+      setIsFullscreen(true)
+    }
     return () => document.removeEventListener('fullscreenchange', onChange)
   }, [])
 
@@ -46,25 +63,28 @@ export default function DisplayPage() {
     return () => { supabase.removeChannel(ch) }
   }, [])
 
-  // Apply screen orientation when rotation or fullscreen changes
+  // Try screen.orientation.lock (works in fullscreen on Chrome; may work natively on Tizen).
+  // Fall back to CSS transform on the html element.
   useEffect(() => {
-    type LockType = 'landscape-primary' | 'landscape-secondary' | 'portrait-primary' | 'portrait-secondary'
-    const orient = screen.orientation as ScreenOrientation & {
-      lock?: (o: LockType) => Promise<void>
-      unlock?: () => void
-    }
-    if (!isFullscreen || !orient?.lock) return
+    const orient = getOrient()
+    const html = document.documentElement
 
-    const orientations: Record<number, LockType> = {
-      0:   'landscape-primary',
-      90:  'portrait-primary',
-      180: 'landscape-secondary',
-      270: 'portrait-secondary',
+    if (orient?.lock) {
+      orient.lock(ORIENTATION_MAP[rotation]).then(() => {
+        // Lock succeeded — clear any CSS fallback
+        html.style.cssText = ''
+      }).catch(() => {
+        applyCssRotation(rotation)
+      })
+    } else {
+      applyCssRotation(rotation)
     }
-    orient.lock(orientations[rotation]).catch(() => {})
 
-    return () => { orient?.unlock?.() }
-  }, [rotation, isFullscreen])
+    return () => {
+      orient?.unlock?.()
+      html.style.cssText = ''
+    }
+  }, [rotation])
 
   const enterFullscreen = useCallback(async () => {
     await document.documentElement.requestFullscreen().catch(() => {})
@@ -82,17 +102,17 @@ export default function DisplayPage() {
     <>
       <style>{`nextjs-portal { display: none !important; }`}</style>
 
-      {!isFullscreen && (
+      {!isFullscreen && rotation !== 0 && (
         <button
           onClick={enterFullscreen}
           style={{
             position: 'fixed', top: 16, right: 16, zIndex: 9999,
-            padding: '8px 16px', background: '#000', color: '#fff',
+            padding: '10px 18px', background: '#000', color: '#fff',
             border: 'none', borderRadius: 8, cursor: 'pointer',
             fontFamily: 'system-ui', fontSize: 13,
           }}
         >
-          Fullskärm för rotation
+          Klicka för fullskärm (krävs för rotation i Chrome)
         </button>
       )}
 
@@ -103,4 +123,24 @@ export default function DisplayPage() {
         externalView={externalView} externalSelectedPostId={externalSelectedPostId} />
     </>
   )
+}
+
+function applyCssRotation(rotation: number) {
+  const html = document.documentElement
+  html.style.cssText = ''
+  if (rotation === 0) return
+
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+
+  html.style.transformOrigin = '0 0'
+  html.style.overflow = 'hidden'
+
+  if (rotation === 90) {
+    html.style.transform = `translateX(${vh}px) rotate(90deg)`
+  } else if (rotation === 270) {
+    html.style.transform = `translateY(${vw}px) rotate(270deg)`
+  } else if (rotation === 180) {
+    html.style.transform = `translateX(${vw}px) translateY(${vh}px) rotate(180deg)`
+  }
 }

@@ -50,22 +50,18 @@ export default function DisplayPage() {
 
     if (rotation === 0) return
 
+    // Keep html at its original vw×vh dimensions so CSS units (100vw/100vh) keep working.
+    // A landscape 1920×1080 page rotated 90° exactly fills a portrait 1080×1920 screen.
     html.style.overflow = 'hidden'
     body.style.overflow = 'hidden'
     html.style.transformOrigin = '0 0'
 
     if (rotation === 90) {
-      // portrait box: vh wide × vw tall → rotate 90° → fills vw×vh screen
-      html.style.width = `${vh}px`
-      html.style.height = `${vw}px`
-      html.style.transform = `translateY(${vh}px) rotate(90deg)`
+      // rotate(90deg) moves content off the top; translateY(vw) brings it back down
+      html.style.transform = `translateY(${vw}px) rotate(90deg)`
     } else if (rotation === 270) {
-      html.style.width = `${vh}px`
-      html.style.height = `${vw}px`
-      html.style.transform = `translateX(${vw}px) rotate(270deg)`
+      html.style.transform = `translateX(${vh}px) rotate(270deg)`
     } else if (rotation === 180) {
-      html.style.width = `${vw}px`
-      html.style.height = `${vh}px`
       html.style.transform = `translateX(${vw}px) translateY(${vh}px) rotate(180deg)`
     }
 

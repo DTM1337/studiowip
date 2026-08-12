@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import CreativeWall from '@/components/CreativeWall'
 import Rulers from '@/components/Rulers'
 import { Post } from '@/types'
@@ -14,21 +14,19 @@ export default function DisplayPage() {
   const [externalSelectedPostId, setExternalSelectedPostId] = useState<string | null>(null)
   const [rotation, setRotation] = useState(0)
   const [showRulers, setShowRulers] = useState(false)
-  const [dims, setDims] = useState({ vw: 0, vh: 0 })
-  const wrapperRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const update = () => setDims({ vw: window.innerWidth, vh: window.innerHeight })
-    update()
-    window.addEventListener('resize', update)
-    return () => window.removeEventListener('resize', update)
-  }, [])
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   useEffect(() => {
     fetch('/api/posts')
       .then(r => r.json())
       .then(data => { setPosts(data); setLoading(false) })
       .catch(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
   }, [])
 
   useEffect(() => {
@@ -48,33 +46,24 @@ export default function DisplayPage() {
     return () => { supabase.removeChannel(ch) }
   }, [])
 
-  const { vw, vh } = dims
+  // Apply screen orientation when rotation or fullscreen changes
+  useEffect(() => {
+    if (!isFullscreen || !screen.orientation?.lock) return
 
-  // Compute wrapper transform. The wrapper is vw×vh and gets rotated so its
-  // content fills the screen. position:fixed children inside a transformed
-  // ancestor are fixed relative to that ancestor, so everything rotates together.
-  let wrapperStyle: React.CSSProperties = { position: 'fixed', inset: 0, overflow: 'hidden' }
-  if (rotation !== 0 && vw > 0) {
-    // Verified math (transform-origin: 0 0, landscape vw×vh → portrait vh×vw):
-    // rotate(90deg):  (x,y)→(-y,x)  → content at x:-vh→0, y:0→vw → need translateX(vh)
-    // rotate(270deg): (x,y)→(y,-x)  → content at x:0→vh,  y:-vw→0 → need translateY(vw)
-    // rotate(180deg): (x,y)→(-x,-y) → need translateX(vw)+translateY(vh)
-    const transforms: Record<number, string> = {
-      90:  `translateX(${vh}px) rotate(90deg)`,
-      180: `translateX(${vw}px) translateY(${vh}px) rotate(180deg)`,
-      270: `translateY(${vw}px) rotate(270deg)`,
+    const orientations: Record<number, OrientationLockType> = {
+      0:   'landscape-primary',
+      90:  'portrait-primary',
+      180: 'landscape-secondary',
+      270: 'portrait-secondary',
     }
-    wrapperStyle = {
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: `${vw}px`,
-      height: `${vh}px`,
-      overflow: 'hidden',
-      transformOrigin: '0 0',
-      transform: transforms[rotation] ?? '',
-    }
-  }
+    screen.orientation.lock(orientations[rotation]).catch(() => {})
+
+    return () => { screen.orientation?.unlock?.() }
+  }, [rotation, isFullscreen])
+
+  const enterFullscreen = useCallback(async () => {
+    await document.documentElement.requestFullscreen().catch(() => {})
+  }, [])
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#efefef', display: 'flex',
@@ -87,13 +76,26 @@ export default function DisplayPage() {
   return (
     <>
       <style>{`nextjs-portal { display: none !important; }`}</style>
-      <div ref={wrapperRef} style={wrapperStyle}>
-        {showRulers && (
-          <Rulers pan={externalView?.pan ?? { x: 0, y: 0 }} zoom={externalView?.zoom ?? 1} />
-        )}
-        <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
-          externalView={externalView} externalSelectedPostId={externalSelectedPostId} />
-      </div>
+
+      {!isFullscreen && (
+        <button
+          onClick={enterFullscreen}
+          style={{
+            position: 'fixed', top: 16, right: 16, zIndex: 9999,
+            padding: '8px 16px', background: '#000', color: '#fff',
+            border: 'none', borderRadius: 8, cursor: 'pointer',
+            fontFamily: 'system-ui', fontSize: 13,
+          }}
+        >
+          Fullskärm för rotation
+        </button>
+      )}
+
+      {showRulers && (
+        <Rulers pan={externalView?.pan ?? { x: 0, y: 0 }} zoom={externalView?.zoom ?? 1} />
+      )}
+      <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
+        externalView={externalView} externalSelectedPostId={externalSelectedPostId} />
     </>
   )
 }

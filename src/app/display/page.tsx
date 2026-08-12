@@ -48,7 +48,11 @@ export default function DisplayPage() {
 
   // Apply screen orientation when rotation or fullscreen changes
   useEffect(() => {
-    if (!isFullscreen || !screen.orientation?.lock) return
+    const orient = screen.orientation as ScreenOrientation & {
+      lock?: (o: OrientationLockType) => Promise<void>
+      unlock?: () => void
+    }
+    if (!isFullscreen || !orient?.lock) return
 
     const orientations: Record<number, OrientationLockType> = {
       0:   'landscape-primary',
@@ -56,9 +60,9 @@ export default function DisplayPage() {
       180: 'landscape-secondary',
       270: 'portrait-secondary',
     }
-    screen.orientation.lock(orientations[rotation]).catch(() => {})
+    orient.lock(orientations[rotation]).catch(() => {})
 
-    return () => { screen.orientation?.unlock?.() }
+    return () => { orient?.unlock?.() }
   }, [rotation, isFullscreen])
 
   const enterFullscreen = useCallback(async () => {

@@ -584,7 +584,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
           animation: fadeIn .2s ease;
         }
         .lightbox img, .lightbox video {
-          display: block; max-width: 100%; max-height: 100vh;
+          display: block; width: 100%; height: 100%;
           object-fit: contain; pointer-events: none;
         }
         .lb-close {

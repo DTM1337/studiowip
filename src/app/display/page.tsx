@@ -48,13 +48,14 @@ export default function DisplayPage() {
 
   // Apply screen orientation when rotation or fullscreen changes
   useEffect(() => {
+    type LockType = 'landscape-primary' | 'landscape-secondary' | 'portrait-primary' | 'portrait-secondary'
     const orient = screen.orientation as ScreenOrientation & {
-      lock?: (o: OrientationLockType) => Promise<void>
+      lock?: (o: LockType) => Promise<void>
       unlock?: () => void
     }
     if (!isFullscreen || !orient?.lock) return
 
-    const orientations: Record<number, OrientationLockType> = {
+    const orientations: Record<number, LockType> = {
       0:   'landscape-primary',
       90:  'portrait-primary',
       180: 'landscape-secondary',

@@ -102,18 +102,22 @@ export default function DisplayPage() {
     <>
       <style>{`nextjs-portal { display: none !important; }`}</style>
 
-      {!isFullscreen && rotation !== 0 && (
-        <button
+      {!isFullscreen && (
+        <div
           onClick={enterFullscreen}
           style={{
-            position: 'fixed', top: 16, right: 16, zIndex: 9999,
-            padding: '10px 18px', background: '#000', color: '#fff',
-            border: 'none', borderRadius: 8, cursor: 'pointer',
-            fontFamily: 'system-ui', fontSize: 13,
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: '#111', color: '#fff',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', fontFamily: 'system-ui',
+            gap: 12,
           }}
         >
-          Klicka för fullskärm (krävs för rotation i Chrome)
-        </button>
+          <div style={{ fontSize: 48 }}>⛶</div>
+          <div style={{ fontSize: 20, fontWeight: 600 }}>Starta display</div>
+          <div style={{ fontSize: 14, color: '#888' }}>Klicka för fullskärm</div>
+        </div>
       )}
 
       {showRulers && (

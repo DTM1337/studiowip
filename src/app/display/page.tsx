@@ -45,26 +45,29 @@ export default function DisplayPage() {
     const vw = window.innerWidth
     const vh = window.innerHeight
 
-    if (rotation === 0) {
-      html.style.cssText = ''
-      body.style.cssText = ''
-      return
-    }
+    html.style.cssText = ''
+    body.style.cssText = ''
 
-    // Rotate via html element — video elements follow when root is transformed
-    // Standard kiosk/TV rotation pattern: transform-origin top-left + translate
-    const transforms: Record<number, string> = {
-      90:  `rotate(90deg) translateX(0) translateY(-${vh}px)`,
-      180: `rotate(180deg) translateX(-${vw}px) translateY(-${vh}px)`,
-      270: `rotate(270deg) translateX(-${vw}px) translateY(0)`,
-    }
+    if (rotation === 0) return
 
-    html.style.transformOrigin = '0 0'
-    html.style.transform = transforms[rotation] ?? ''
-    html.style.width = (rotation === 90 || rotation === 270) ? `${vh}px` : `${vw}px`
-    html.style.height = (rotation === 90 || rotation === 270) ? `${vw}px` : `${vh}px`
     html.style.overflow = 'hidden'
     body.style.overflow = 'hidden'
+    html.style.transformOrigin = '0 0'
+
+    if (rotation === 90) {
+      // portrait box: vh wide × vw tall → rotate 90° → fills vw×vh screen
+      html.style.width = `${vh}px`
+      html.style.height = `${vw}px`
+      html.style.transform = `translateY(${vh}px) rotate(90deg)`
+    } else if (rotation === 270) {
+      html.style.width = `${vh}px`
+      html.style.height = `${vw}px`
+      html.style.transform = `translateX(${vw}px) rotate(270deg)`
+    } else if (rotation === 180) {
+      html.style.width = `${vw}px`
+      html.style.height = `${vh}px`
+      html.style.transform = `translateX(${vw}px) translateY(${vh}px) rotate(180deg)`
+    }
 
     return () => {
       html.style.cssText = ''

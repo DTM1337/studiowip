@@ -47,5 +47,6 @@ export async function transcodeToH264(
   await ff.deleteFile(inputName)
   await ff.deleteFile(outputName)
 
-  return new File([data], 'video.mp4', { type: 'video/mp4' })
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer)
+  return new File([bytes.buffer as ArrayBuffer], 'video.mp4', { type: 'video/mp4' })
 }

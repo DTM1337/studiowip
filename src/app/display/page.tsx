@@ -19,11 +19,18 @@ export default function DisplayPage() {
   // explicitly from GodMode so a plain reload always lands on the light path.
   const [canvasVideo, setCanvasVideo] = useState(false)
   const [debug, setDebug] = useState<string[]>([])
+  // Toggled from GodMode so nothing has to be typed on a TV remote; the query
+  // param stays as a way to have it on from the first paint.
+  const [showDebug, setShowDebug] = useState(false)
 
-  // /display?debug=1 reports what each video is actually doing on the TV,
-  // which cannot be inspected any other way.
   useEffect(() => {
-    if (!new URLSearchParams(window.location.search).has('debug')) return
+    if (new URLSearchParams(window.location.search).has('debug')) setShowDebug(true)
+  }, [])
+
+  // Reports what each video is actually doing on the TV, which cannot be
+  // inspected any other way.
+  useEffect(() => {
+    if (!showDebug) { setDebug([]); return }
     const tick = () => {
       const rows = [...document.querySelectorAll('canvas')].map((c, i) => {
         const d = (c as HTMLCanvasElement).dataset
@@ -35,7 +42,7 @@ export default function DisplayPage() {
     tick()
     const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
-  }, [rotation, canvasVideo])
+  }, [rotation, canvasVideo, showDebug])
 
   useEffect(() => {
     fetch('/api/posts')
@@ -58,6 +65,8 @@ export default function DisplayPage() {
         setShowRulers(r => !r)
       } else if (cmd.action === 'toggle-canvas-video') {
         setCanvasVideo(v => !v)
+      } else if (cmd.action === 'toggle-debug') {
+        setShowDebug(d => !d)
       }
     }).subscribe()
     return () => { supabase.removeChannel(ch) }

@@ -8,6 +8,7 @@ export type DisplayCommand =
   | { action: 'rotate' }
   | { action: 'toggle-rulers' }
   | { action: 'toggle-canvas-video' }
+  | { action: 'toggle-debug' }
 
 export function sendCommand(cmd: DisplayCommand) {
   supabase.channel(CHANNEL).send({

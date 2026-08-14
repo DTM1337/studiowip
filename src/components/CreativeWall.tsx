@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Post } from '@/types'
+import CanvasVideo from './CanvasVideo'
 
 function seededRand(seed: string) {
   let h = 0
@@ -64,12 +65,14 @@ interface Props {
   externalView?: { pan: { x: number; y: number }; zoom: number } | null
   onSelectPost?: (postId: string | null) => void
   externalSelectedPostId?: string | null
+  /** Paint videos through a <canvas> so they survive a CSS-rotated page. */
+  canvasVideo?: boolean
 }
 
 type LivePositions = Record<string, { x: number; y: number }>
 type LiveSizes = Record<string, number>
 
-export default function CreativeWall({ initialPosts, uploaderName, displayMode = false, onViewChange, externalView, onSelectPost, externalSelectedPostId }: Props) {
+export default function CreativeWall({ initialPosts, uploaderName, displayMode = false, onViewChange, externalView, onSelectPost, externalSelectedPostId, canvasVideo = false }: Props) {
   const [posts, setPosts]                 = useState<Post[]>(initialPosts)
   const [selectedPost, setSelectedPost]   = useState<Post | null>(null)
   const [focusedPost, setFocusedPost]     = useState<Post | null>(null)
@@ -460,6 +463,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
                 zIndex={z}
                 isLive={!!live}
                 displayMode={displayMode}
+                canvasVideo={canvasVideo}
                 onDragging={(x, y) => broadcastMove(post.id, x, y)}
                 onResizing={(w) => broadcastResize(post.id, w)}
                 onMoved={(dx, dy) => { bringToFront(post.id); handleMoved(post, dx, dy) }}
@@ -493,7 +497,9 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
             {lbPost.file_type === 'image'
               // eslint-disable-next-line @next/next/no-img-element
               ? <img src={lbPost.file_url} alt={lbPost.caption ?? ''} />
-              : <video src={lbPost.file_url} autoPlay loop playsInline muted controls={!isExternal} />
+              : canvasVideo
+                ? <CanvasVideo src={lbPost.file_url} />
+                : <video src={lbPost.file_url} autoPlay loop playsInline muted controls={!isExternal} />
             }
             {!isExternal && (lbPost.uploader_name || lbPost.caption) && (
               <div className="lb-footer">
@@ -510,7 +516,9 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
           {focusedPost.file_type === 'image'
             // eslint-disable-next-line @next/next/no-img-element
             ? <img src={focusedPost.file_url} alt={focusedPost.caption ?? ''} />
-            : <video src={focusedPost.file_url} autoPlay loop playsInline muted />
+            : canvasVideo
+              ? <CanvasVideo src={focusedPost.file_url} />
+              : <video src={focusedPost.file_url} autoPlay loop playsInline muted />
           }
           <div className="show-only-hint">Klicka för att stänga</div>
         </div>
@@ -583,7 +591,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
           cursor: pointer;
           animation: fadeIn .2s ease;
         }
-        .lightbox img, .lightbox video {
+        .lightbox img, .lightbox video, .lightbox canvas {
           display: block; width: 100%; height: 100%;
           object-fit: contain; pointer-events: none;
         }
@@ -617,7 +625,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
           animation: fadeIn .3s ease;
         }
         @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
-        .show-only img, .show-only video {
+        .show-only img, .show-only video, .show-only canvas {
           max-width: 100%; max-height: 100%;
           object-fit: contain; display: block;
         }
@@ -639,6 +647,7 @@ interface CardProps {
   zIndex: number
   isLive: boolean
   displayMode: boolean
+  canvasVideo: boolean
   onDragging: (x: number, y: number) => void
   onResizing: (w: number) => void
   onMoved: (dx: number, dy: number) => void
@@ -646,7 +655,7 @@ interface CardProps {
   onClick: () => void
 }
 
-function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode, onDragging, onResizing, onMoved, onResized, onClick }: CardProps) {
+function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode, canvasVideo, onDragging, onResizing, onMoved, onResized, onClick }: CardProps) {
   const resizing    = useRef(false)
   const startX      = useRef(0)
   const startW      = useRef(0)
@@ -751,7 +760,9 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
         {post.file_type === 'image'
           // eslint-disable-next-line @next/next/no-img-element
           ? <img src={post.file_url} alt={post.caption ?? ''} draggable={false} />
-          : <video src={post.file_url} muted loop playsInline autoPlay />
+          : canvasVideo
+            ? <CanvasVideo src={post.file_url} />
+            : <video src={post.file_url} muted loop playsInline autoPlay />
         }
         {!displayMode && (
           <div className="card-hover-overlay">
@@ -789,7 +800,7 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
         .wall-card.display-mode { cursor: pointer; }
         .wall-card.is-live:not(.display-mode) { outline: 2px solid #4a9eff; outline-offset: 2px; }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
-        .card-media img, .card-media video {
+        .card-media img, .card-media video, .card-media canvas {
           width: 100%; height: 100%; object-fit: cover; display: block;
           transition: transform .45s ease; pointer-events: none;
         }

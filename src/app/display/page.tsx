@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import CreativeWall from '@/components/CreativeWall'
 import Rulers from '@/components/Rulers'
 import { Post } from '@/types'
@@ -22,6 +22,7 @@ export default function DisplayPage() {
   // Toggled from GodMode so nothing has to be typed on a TV remote; the query
   // param stays as a way to have it on from the first paint.
   const [showDebug, setShowDebug] = useState(false)
+  const cmdLog = useRef({ total: 0, rotates: 0, last: '-', at: 0 })
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('debug')) setShowDebug(true)
@@ -37,7 +38,14 @@ export default function DisplayPage() {
         return `#${i} frames=${d.frames ?? '-'} ready=${d.ready ?? '-'} paused=${d.paused ?? '-'} t=${d.time ?? '-'} nat=${d.nat ?? '-'} buf=${d.buf ?? '-'} err=${d.err ?? '-'} draw=${d.draw ?? '-'}`
       })
       const vids = document.querySelectorAll('video').length
-      setDebug([`rot=${rotation} canvasMode=${canvasVideo} canvas=${rows.length} video=${vids}`, ...rows])
+      const c = cmdLog.current
+      const ago = c.at ? `${Math.round((Date.now() - c.at) / 1000)}s` : '-'
+      const subs = supabase.getChannels().filter(ch => ch.topic.endsWith(CHANNEL)).length
+      setDebug([
+        `rot=${rotation} canvasMode=${canvasVideo} canvas=${rows.length} video=${vids}`,
+        `cmds=${c.total} rotates=${c.rotates} last=${c.last} ${ago} ago subs=${subs}`,
+        ...rows,
+      ])
     }
     tick()
     const id = window.setInterval(tick, 1000)
@@ -52,9 +60,24 @@ export default function DisplayPage() {
   }, [])
 
   useEffect(() => {
+    // Drop any channel left over from a previous mount before opening a new
+    // one. Two live subscriptions to the same topic would run this handler
+    // twice per command, turning one rotate press into 180°.
+    supabase.getChannels()
+      .filter(c => c.topic.endsWith(CHANNEL))
+      .forEach(c => { supabase.removeChannel(c) })
+
     const ch = supabase.channel(CHANNEL)
     ch.on('broadcast', { event: 'cmd' }, ({ payload }) => {
       const cmd = payload as { action: string; [key: string]: unknown }
+      // Counted so the diagnostics can distinguish "commands really are
+      // arriving" from "one press is being handled more than once".
+      if (cmd.action !== 'view-sync') {
+        cmdLog.current.total++
+        cmdLog.current.last = cmd.action
+        cmdLog.current.at = Date.now()
+        if (cmd.action === 'rotate') cmdLog.current.rotates++
+      }
       if (cmd.action === 'view-sync') {
         setExternalView({ pan: cmd.pan as { x: number; y: number }, zoom: cmd.zoom as number })
       } else if (cmd.action === 'select-post') {

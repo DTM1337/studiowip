@@ -45,6 +45,8 @@ export default function CanvasVideo({ src, className }: Props) {
     let rafHandle = 0
     let frameHandle = 0
 
+    let frames = 0
+
     const paint = () => {
       const vw = video.videoWidth
       const vh = video.videoHeight
@@ -54,6 +56,7 @@ export default function CanvasVideo({ src, className }: Props) {
         canvas.height = vh
       }
       ctx.drawImage(video, 0, 0)
+      frames++
     }
 
     // requestVideoFrameCallback fires once per decoded frame, so we never paint
@@ -89,7 +92,16 @@ export default function CanvasVideo({ src, className }: Props) {
     // can end up silently parked even after a successful play(). Cheap poll
     // that nudges anything found paused back into playback.
     const watchdog = window.setInterval(() => {
-      if (!stopped && video.paused) video.play().catch(() => {})
+      if (stopped) return
+      if (video.paused) video.play().catch(() => {})
+      // Surfaced on /display?debug=1 — the only way to see what the TV is
+      // actually doing, since it cannot be inspected directly.
+      canvas.dataset.frames = String(frames)
+      canvas.dataset.ready = String(video.readyState)
+      canvas.dataset.paused = String(video.paused)
+      canvas.dataset.time = video.currentTime.toFixed(1)
+      canvas.dataset.nat = `${video.videoWidth}x${video.videoHeight}`
+      canvas.dataset.err = video.error ? String(video.error.code) : '-'
     }, 1500)
 
     return () => {
@@ -106,7 +118,8 @@ export default function CanvasVideo({ src, className }: Props) {
 
   return (
     <>
-      <canvas ref={canvasRef} className={className} />
+      {/* Full size and genuinely rendered, so the engine has no reason to skip
+          decoding it, but stacked underneath the canvas that covers it. */}
       <video
         ref={videoRef}
         src={src}
@@ -119,15 +132,17 @@ export default function CanvasVideo({ src, className }: Props) {
         tabIndex={-1}
         style={{
           position: 'absolute',
-          top: 0,
-          left: 0,
-          width: '1px',
-          height: '1px',
-          minWidth: 0,
-          minHeight: 0,
-          opacity: 0,
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          zIndex: 0,
           pointerEvents: 'none',
         }}
+      />
+      <canvas
+        ref={canvasRef}
+        className={className}
+        style={{ position: 'relative', zIndex: 1 }}
       />
     </>
   )

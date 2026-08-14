@@ -14,6 +14,24 @@ export default function DisplayPage() {
   const [externalSelectedPostId, setExternalSelectedPostId] = useState<string | null>(null)
   const [rotation, setRotation] = useState(0)
   const [showRulers, setShowRulers] = useState(false)
+  const [debug, setDebug] = useState<string[]>([])
+
+  // /display?debug=1 reports what each video is actually doing on the TV,
+  // which cannot be inspected any other way.
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('debug')) return
+    const tick = () => {
+      const rows = [...document.querySelectorAll('canvas')].map((c, i) => {
+        const d = (c as HTMLCanvasElement).dataset
+        return `#${i} frames=${d.frames ?? '-'} ready=${d.ready ?? '-'} paused=${d.paused ?? '-'} t=${d.time ?? '-'} nat=${d.nat ?? '-'} err=${d.err ?? '-'}`
+      })
+      const vids = document.querySelectorAll('video').length
+      setDebug([`rot=${rotation} canvas=${rows.length} video=${vids}`, ...rows])
+    }
+    tick()
+    const id = window.setInterval(tick, 1000)
+    return () => window.clearInterval(id)
+  }, [rotation])
 
   useEffect(() => {
     fetch('/api/posts')
@@ -111,6 +129,16 @@ export default function DisplayPage() {
   return (
     <>
       <style>{`nextjs-portal { display: none !important; }`}</style>
+      {debug.length > 0 && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,.85)', color: '#0f0', padding: '10px 14px',
+          font: '13px ui-monospace, Menlo, monospace', lineHeight: 1.5,
+          whiteSpace: 'pre', pointerEvents: 'none',
+        }}>
+          {debug.join('\n')}
+        </div>
+      )}
       {showRulers && (
         <Rulers pan={externalView?.pan ?? { x: 0, y: 0 }} zoom={externalView?.zoom ?? 1} />
       )}

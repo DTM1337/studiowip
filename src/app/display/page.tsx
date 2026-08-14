@@ -98,9 +98,13 @@ export default function DisplayPage() {
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#efefef', display: 'flex',
+                  flexDirection: 'column', gap: '8px',
                   alignItems: 'center', justifyContent: 'center',
                   fontFamily: 'system-ui', fontSize: '14px', color: '#aaa' }}>
-      Laddar…
+      <div>Laddar…</div>
+      <div style={{ fontSize: '12px', color: '#c4c4c4' }}>
+        version {process.env.NEXT_PUBLIC_BUILD_COMMIT} · {process.env.NEXT_PUBLIC_BUILD_TIME} UTC
+      </div>
     </div>
   )
 

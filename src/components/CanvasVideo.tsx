@@ -7,11 +7,6 @@ type Props = {
   className?: string
 }
 
-type FrameCallbackVideo = HTMLVideoElement & {
-  requestVideoFrameCallback?: (cb: () => void) => number
-  cancelVideoFrameCallback?: (handle: number) => void
-}
-
 /**
  * Plays a video by painting its frames into a <canvas>.
  *
@@ -36,16 +31,14 @@ export default function CanvasVideo({ src, className }: Props) {
 
   useEffect(() => {
     const canvas = canvasRef.current
-    const video = videoRef.current as FrameCallbackVideo | null
+    const video = videoRef.current
     if (!canvas || !video) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
     let stopped = false
-    let rafHandle = 0
-    let frameHandle = 0
-
     let frames = 0
+    let drawErr = '-'
 
     // Copying frames at full source resolution is more than a TV can sustain,
     // so the buffer is capped on its long side. Scaling both axes by the same
@@ -53,10 +46,18 @@ export default function CanvasVideo({ src, className }: Props) {
     // which is what makes surrounding layout and object-fit behave unchanged.
     const MAX_EDGE = 720
 
+    let lastPaint = 0
+
     const paint = () => {
       const vw = video.videoWidth
       const vh = video.videoHeight
       if (!vw || !vh) return
+
+      // Two independent drivers call this; the guard keeps the combined rate at
+      // ~25fps instead of painting the same frame twice.
+      const now = Date.now()
+      if (now - lastPaint < 38) return
+      lastPaint = now
 
       const k = Math.min(1, MAX_EDGE / Math.max(vw, vh))
       const bw = Math.max(1, Math.round(vw * k))
@@ -66,29 +67,29 @@ export default function CanvasVideo({ src, className }: Props) {
         canvas.width = bw
         canvas.height = bh
       }
-      ctx.drawImage(video, 0, 0, bw, bh)
-      frames++
+      // A throwing drawImage must not be able to kill the painter, and the
+      // reason has to be visible: the TV cannot be inspected any other way.
+      try {
+        ctx.drawImage(video, 0, 0, bw, bh)
+        frames++
+      } catch (e) {
+        drawErr = e instanceof Error ? `${e.name}` : 'throw'
+      }
     }
 
-    // requestVideoFrameCallback fires once per decoded frame, so we never paint
-    // more often than the video actually updates. rAF is the fallback, throttled
-    // to ~25fps to keep weak TV CPUs from being pegged.
-    if (typeof video.requestVideoFrameCallback === 'function') {
-      const onFrame = () => {
-        if (stopped) return
-        paint()
-        frameHandle = video.requestVideoFrameCallback!(onFrame)
-      }
-      frameHandle = video.requestVideoFrameCallback(onFrame)
-    } else {
-      let last = 0
-      const step = (now: number) => {
-        if (stopped) return
-        if (now - last >= 40) { last = now; paint() }
-        rafHandle = requestAnimationFrame(step)
-      }
+    // Two drivers, because neither is reliable alone. A self-rescheduling chain
+    // (rAF, or requestVideoFrameCallback as used before) stops permanently if a
+    // single callback is missed or throws — which is exactly what stalled
+    // painting on the TV. setInterval ticks independently so it always recovers,
+    // but gets throttled when a page is backgrounded. Together they cover both.
+    const painter = window.setInterval(paint, 40)
+    let rafHandle = 0
+    const step = () => {
+      if (stopped) return
+      paint()
       rafHandle = requestAnimationFrame(step)
     }
+    rafHandle = requestAnimationFrame(step)
 
     // Autoplay can be refused before the element is ready, so retry on each
     // readiness milestone rather than relying on the autoplay attribute alone.
@@ -114,13 +115,14 @@ export default function CanvasVideo({ src, className }: Props) {
       canvas.dataset.nat = `${video.videoWidth}x${video.videoHeight}`
       canvas.dataset.buf = `${canvas.width}x${canvas.height}`
       canvas.dataset.err = video.error ? String(video.error.code) : '-'
+      canvas.dataset.draw = drawErr
     }, 1500)
 
     return () => {
       stopped = true
+      window.clearInterval(painter)
       window.clearInterval(watchdog)
       if (rafHandle) cancelAnimationFrame(rafHandle)
-      if (frameHandle && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(frameHandle)
       video.removeEventListener('loadedmetadata', kick)
       video.removeEventListener('loadeddata', kick)
       video.removeEventListener('canplay', kick)

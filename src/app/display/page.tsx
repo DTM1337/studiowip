@@ -34,7 +34,7 @@ export default function DisplayPage() {
     const tick = () => {
       const rows = [...document.querySelectorAll('canvas')].map((c, i) => {
         const d = (c as HTMLCanvasElement).dataset
-        return `#${i} frames=${d.frames ?? '-'} ready=${d.ready ?? '-'} paused=${d.paused ?? '-'} t=${d.time ?? '-'} nat=${d.nat ?? '-'} buf=${d.buf ?? '-'} err=${d.err ?? '-'}`
+        return `#${i} frames=${d.frames ?? '-'} ready=${d.ready ?? '-'} paused=${d.paused ?? '-'} t=${d.time ?? '-'} nat=${d.nat ?? '-'} buf=${d.buf ?? '-'} err=${d.err ?? '-'} draw=${d.draw ?? '-'}`
       })
       const vids = document.querySelectorAll('video').length
       setDebug([`rot=${rotation} canvasMode=${canvasVideo} canvas=${rows.length} video=${vids}`, ...rows])

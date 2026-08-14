@@ -47,15 +47,26 @@ export default function CanvasVideo({ src, className }: Props) {
 
     let frames = 0
 
+    // Copying frames at full source resolution is more than a TV can sustain,
+    // so the buffer is capped on its long side. Scaling both axes by the same
+    // factor keeps the canvas's intrinsic aspect ratio identical to the video's,
+    // which is what makes surrounding layout and object-fit behave unchanged.
+    const MAX_EDGE = 720
+
     const paint = () => {
       const vw = video.videoWidth
       const vh = video.videoHeight
       if (!vw || !vh) return
-      if (canvas.width !== vw || canvas.height !== vh) {
-        canvas.width = vw
-        canvas.height = vh
+
+      const k = Math.min(1, MAX_EDGE / Math.max(vw, vh))
+      const bw = Math.max(1, Math.round(vw * k))
+      const bh = Math.max(1, Math.round(vh * k))
+
+      if (canvas.width !== bw || canvas.height !== bh) {
+        canvas.width = bw
+        canvas.height = bh
       }
-      ctx.drawImage(video, 0, 0)
+      ctx.drawImage(video, 0, 0, bw, bh)
       frames++
     }
 
@@ -101,6 +112,7 @@ export default function CanvasVideo({ src, className }: Props) {
       canvas.dataset.paused = String(video.paused)
       canvas.dataset.time = video.currentTime.toFixed(1)
       canvas.dataset.nat = `${video.videoWidth}x${video.videoHeight}`
+      canvas.dataset.buf = `${canvas.width}x${canvas.height}`
       canvas.dataset.err = video.error ? String(video.error.code) : '-'
     }, 1500)
 

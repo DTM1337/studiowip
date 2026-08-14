@@ -14,6 +14,10 @@ export default function DisplayPage() {
   const [externalSelectedPostId, setExternalSelectedPostId] = useState<string | null>(null)
   const [rotation, setRotation] = useState(0)
   const [showRulers, setShowRulers] = useState(false)
+  // Off by default: canvas rendering costs a decode plus a full-resolution
+  // frame copy per video, which a TV may not have headroom for. Turned on
+  // explicitly from GodMode so a plain reload always lands on the light path.
+  const [canvasVideo, setCanvasVideo] = useState(false)
   const [debug, setDebug] = useState<string[]>([])
 
   // /display?debug=1 reports what each video is actually doing on the TV,
@@ -23,15 +27,15 @@ export default function DisplayPage() {
     const tick = () => {
       const rows = [...document.querySelectorAll('canvas')].map((c, i) => {
         const d = (c as HTMLCanvasElement).dataset
-        return `#${i} frames=${d.frames ?? '-'} ready=${d.ready ?? '-'} paused=${d.paused ?? '-'} t=${d.time ?? '-'} nat=${d.nat ?? '-'} err=${d.err ?? '-'}`
+        return `#${i} frames=${d.frames ?? '-'} ready=${d.ready ?? '-'} paused=${d.paused ?? '-'} t=${d.time ?? '-'} nat=${d.nat ?? '-'} buf=${d.buf ?? '-'} err=${d.err ?? '-'}`
       })
       const vids = document.querySelectorAll('video').length
-      setDebug([`rot=${rotation} canvas=${rows.length} video=${vids}`, ...rows])
+      setDebug([`rot=${rotation} canvasMode=${canvasVideo} canvas=${rows.length} video=${vids}`, ...rows])
     }
     tick()
     const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
-  }, [rotation])
+  }, [rotation, canvasVideo])
 
   useEffect(() => {
     fetch('/api/posts')
@@ -52,6 +56,8 @@ export default function DisplayPage() {
         setRotation(r => (r + 90) % 360)
       } else if (cmd.action === 'toggle-rulers') {
         setShowRulers(r => !r)
+      } else if (cmd.action === 'toggle-canvas-video') {
+        setCanvasVideo(v => !v)
       }
     }).subscribe()
     return () => { supabase.removeChannel(ch) }
@@ -144,7 +150,7 @@ export default function DisplayPage() {
       )}
       <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
         externalView={externalView} externalSelectedPostId={externalSelectedPostId}
-        canvasVideo={rotation !== 0} />
+        canvasVideo={canvasVideo} />
     </>
   )
 }

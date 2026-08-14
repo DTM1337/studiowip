@@ -83,6 +83,18 @@ export default function DisplayPage() {
         html, body { width: ${W}px !important; height: ${H}px !important; }
         .wall-root { width: ${W}px !important; height: ${H}px !important; min-height: ${H}px !important; }
         .wall-stage { width: ${W}px !important; height: ${H}px !important; }
+
+        /* Samsung Tizen composites <video> into a hardware overlay plane whose
+           bounds are computed from the pre-transform layout: the frame gets
+           rotated but the window it is drawn into stays landscape. Giving each
+           video its own transform forces it off the overlay plane and onto the
+           normal composited path, where the ancestor rotation applies properly.
+           Visually a no-op (0.01% scale) on browsers that were already correct. */
+        .card-media video, .lightbox video, .show-only video {
+          transform: scale(1.0001) !important;
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+        }
       `
     }
 

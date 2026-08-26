@@ -22,11 +22,17 @@ export default function DisplayPage() {
   // Toggled from GodMode so nothing has to be typed on a TV remote; the query
   // param stays as a way to have it on from the first paint.
   const [showDebug, setShowDebug] = useState(false)
-  const cmdLog = useRef({ total: 0, rotates: 0, last: '-', at: 0 })
+  const cmdLog = useRef({ total: 0, rotates: 0, last: '-', at: 0, recent: [] as string[] })
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('debug')) setShowDebug(true)
   }, [])
+
+  // Read inside CanvasVideo's paint loop to draw its test marker, avoiding
+  // threading a debug-only prop through CreativeWall.
+  useEffect(() => {
+    document.documentElement.dataset.canvasDebug = showDebug ? '1' : '0'
+  }, [showDebug])
 
   // Reports what each video is actually doing on the TV, which cannot be
   // inspected any other way.
@@ -44,6 +50,7 @@ export default function DisplayPage() {
       setDebug([
         `rot=${rotation} canvasMode=${canvasVideo} canvas=${rows.length} video=${vids}`,
         `cmds=${c.total} rotates=${c.rotates} last=${c.last} ${ago} ago subs=${subs}`,
+        ...c.recent.map(r => `  ${r}`),
         ...rows,
       ])
     }
@@ -77,6 +84,10 @@ export default function DisplayPage() {
         cmdLog.current.last = cmd.action
         cmdLog.current.at = Date.now()
         if (cmd.action === 'rotate') cmdLog.current.rotates++
+        // Wall-clock times, so an unexplained rotate can be matched against
+        // whether anyone was actually at a GodMode screen at that moment.
+        cmdLog.current.recent.unshift(`${new Date().toTimeString().slice(0, 8)} ${cmd.action}`)
+        cmdLog.current.recent = cmdLog.current.recent.slice(0, 4)
       }
       if (cmd.action === 'view-sync') {
         setExternalView({ pan: cmd.pan as { x: number; y: number }, zoom: cmd.zoom as number })

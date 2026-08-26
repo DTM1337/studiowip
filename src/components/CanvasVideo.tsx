@@ -75,6 +75,18 @@ export default function CanvasVideo({ src, className }: Props) {
       } catch (e) {
         drawErr = e instanceof Error ? `${e.name}` : 'throw'
       }
+
+      // Diagnostic marker, drawn independently of the video. It separates the
+      // two failure modes that look identical from the outside: a canvas that
+      // never reaches the screen, versus one that paints but gets no pixels
+      // out of drawImage.
+      if (document.documentElement.dataset.canvasDebug === '1') {
+        ctx.fillStyle = '#f0f'
+        ctx.fillRect(0, 0, Math.round(bw / 3), Math.round(bh / 6))
+        ctx.fillStyle = '#fff'
+        ctx.font = `${Math.max(12, Math.round(bh / 12))}px monospace`
+        ctx.fillText(String(frames), 8, Math.round(bh / 10))
+      }
     }
 
     // Two drivers, because neither is reliable alone. A self-rescheduling chain

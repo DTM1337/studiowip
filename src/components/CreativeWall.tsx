@@ -69,12 +69,21 @@ interface Props {
   canvasVideo?: boolean
   /** Skip the fullscreen view for videos; something outside is drawing it. */
   suppressFullscreenVideo?: boolean
+  /**
+   * Leave card videos empty so an unrotated layer outside the rotated wrapper
+   * can draw them. Needed because Tizen ignores an ancestor transform on a
+   * <video> and would place the clip at its pre-rotation position.
+   */
+  externalVideoLayer?: boolean
+  /** Width/height per video post, used to size the empty card boxes. */
+  videoAspects?: Record<string, number>
 }
 
 type LivePositions = Record<string, { x: number; y: number }>
 type LiveSizes = Record<string, number>
 
-export default function CreativeWall({ initialPosts, uploaderName, displayMode = false, onViewChange, externalView, onSelectPost, externalSelectedPostId, canvasVideo = false, suppressFullscreenVideo = false }: Props) {
+export default function CreativeWall({ initialPosts, uploaderName, displayMode = false, onViewChange, externalView, onSelectPost, externalSelectedPostId, canvasVideo = false, suppressFullscreenVideo = false,
+  externalVideoLayer = false, videoAspects }: Props) {
   const [posts, setPosts]                 = useState<Post[]>(initialPosts)
   const [selectedPost, setSelectedPost]   = useState<Post | null>(null)
   const [focusedPost, setFocusedPost]     = useState<Post | null>(null)
@@ -476,6 +485,8 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
                 isLive={!!live}
                 displayMode={displayMode}
                 canvasVideo={canvasVideo}
+                externalVideoLayer={externalVideoLayer}
+                videoAspect={videoAspects?.[post.id]}
                 onDragging={(x, y) => broadcastMove(post.id, x, y)}
                 onResizing={(w) => broadcastResize(post.id, w)}
                 onMoved={(dx, dy) => { bringToFront(post.id); handleMoved(post, dx, dy) }}
@@ -663,6 +674,8 @@ interface CardProps {
   isLive: boolean
   displayMode: boolean
   canvasVideo: boolean
+  externalVideoLayer: boolean
+  videoAspect?: number
   onDragging: (x: number, y: number) => void
   onResizing: (w: number) => void
   onMoved: (dx: number, dy: number) => void
@@ -670,7 +683,7 @@ interface CardProps {
   onClick: () => void
 }
 
-function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode, canvasVideo, onDragging, onResizing, onMoved, onResized, onClick }: CardProps) {
+function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode, canvasVideo, externalVideoLayer, videoAspect, onDragging, onResizing, onMoved, onResized, onClick }: CardProps) {
   const resizing    = useRef(false)
   const startX      = useRef(0)
   const startW      = useRef(0)
@@ -771,13 +784,28 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
       onPointerMove={onCardPointerMove}
       onPointerUp={onCardPointerUp}
     >
-      <div className={`card-media ${aspectClass}`}>
+      <div
+        className={`card-media ${aspectClass}`}
+        // Measured from outside to place this card's video in the unrotated
+        // layer; see externalVideoLayer.
+        data-video-card={post.file_type === 'video' && externalVideoLayer ? post.id : undefined}
+        // With no media element inside, the box has nothing to take its height
+        // from, so the clip's own ratio has to be supplied explicitly.
+        style={post.file_type === 'video' && externalVideoLayer
+          ? { aspectRatio: String(videoAspect ?? 16 / 9) }
+          : undefined}
+      >
         {post.file_type === 'image'
           // eslint-disable-next-line @next/next/no-img-element
           ? <img src={post.file_url} alt={post.caption ?? ''} draggable={false} />
-          : canvasVideo
-            ? <CanvasVideo src={post.file_url} />
-            : <video src={post.file_url} muted loop playsInline autoPlay />
+          : externalVideoLayer
+            // Left empty on purpose: the frame is drawn by the external layer,
+            // but the box still has to occupy its normal space so the card
+            // keeps its size and the layer has something to measure.
+            ? null
+            : canvasVideo
+              ? <CanvasVideo src={post.file_url} />
+              : <video src={post.file_url} muted loop playsInline autoPlay />
         }
         {!displayMode && (
           <div className="card-hover-overlay">

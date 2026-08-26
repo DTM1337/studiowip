@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import CreativeWall from '@/components/CreativeWall'
 import RotatedVideoOverlay from '@/components/RotatedVideoOverlay'
+import WallVideoLayer from '@/components/WallVideoLayer'
 import Rulers from '@/components/Rulers'
 import { Post } from '@/types'
 import { supabase } from '@/lib/supabase'
@@ -187,6 +188,31 @@ export default function DisplayPage() {
     }
   }, [rotation, showDebug])
 
+  // Only a quarter turn clockwise has pre-rotated files, so only then can card
+  // videos move to the unrotated layer; otherwise they stay in the wall.
+  const useWallVideoLayer = rotation === 90
+  const videoPosts = useMemo(() => posts.filter(p => p.file_type === 'video'), [posts])
+
+  // The card boxes are empty while the layer draws their clips, so they have no
+  // media to take a height from and each ratio has to be measured up front.
+  const [videoAspects, setVideoAspects] = useState<Record<string, number>>({})
+  useEffect(() => {
+    if (!useWallVideoLayer) return
+    let cancelled = false
+    for (const post of videoPosts) {
+      const probe = document.createElement('video')
+      probe.preload = 'metadata'
+      probe.onloadedmetadata = () => {
+        if (cancelled || !probe.videoWidth || !probe.videoHeight) return
+        setVideoAspects(prev => prev[post.id]
+          ? prev
+          : { ...prev, [post.id]: probe.videoWidth / probe.videoHeight })
+      }
+      probe.src = post.file_url
+    }
+    return () => { cancelled = true }
+  }, [useWallVideoLayer, videoPosts])
+
   const fullscreenPost = externalSelectedPostId
     ? posts.find(p => p.id === externalSelectedPostId) ?? null
     : null
@@ -227,8 +253,11 @@ export default function DisplayPage() {
         )}
         <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
           externalView={externalView} externalSelectedPostId={externalSelectedPostId}
-          suppressFullscreenVideo={useVideoOverlay} />
+          suppressFullscreenVideo={useVideoOverlay}
+          externalVideoLayer={useWallVideoLayer}
+          videoAspects={videoAspects} />
       </div>
+      {useWallVideoLayer && <WallVideoLayer posts={videoPosts} />}
       {useVideoOverlay && fullscreenPost && (
         <RotatedVideoOverlay src={fullscreenPost.file_url} rotation={rotation}
           forceOriginal={plainVideo} />

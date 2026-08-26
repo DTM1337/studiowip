@@ -25,6 +25,7 @@ export default function DisplayPage() {
   // Toggled from GodMode so nothing has to be typed on a TV remote; the query
   // param stays as a way to have it on from the first paint.
   const [showDebug, setShowDebug] = useState(false)
+  const [hideCursor, setHideCursor] = useState(false)
   const cmdLog = useRef({ total: 0, rotates: 0, last: '-', at: 0, recent: [] as string[] })
 
   useEffect(() => {
@@ -52,7 +53,7 @@ export default function DisplayPage() {
       const subs = supabase.getChannels().filter(ch => ch.topic.endsWith(CHANNEL)).length
       const fs = document.documentElement.dataset.fsVideo
       setDebug([
-        `rot=${rotation} plainMode=${plainVideo} canvas=${rows.length} video=${vids}`,
+        `rot=${rotation} plainMode=${plainVideo} cursor=${hideCursor ? 'hidden' : 'visible'} video=${vids}`,
         ...(fs ? [`FS ${fs}`] : []),
         `cmds=${c.total} rotates=${c.rotates} last=${c.last} ${ago} ago subs=${subs}`,
         ...c.recent.map(r => `  ${r}`),
@@ -62,7 +63,7 @@ export default function DisplayPage() {
     tick()
     const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
-  }, [rotation, plainVideo, showDebug])
+  }, [rotation, plainVideo, showDebug, hideCursor])
 
   useEffect(() => {
     fetch('/api/posts')
@@ -106,6 +107,8 @@ export default function DisplayPage() {
         setPlainVideo(v => !v)
       } else if (cmd.action === 'toggle-debug') {
         setShowDebug(d => !d)
+      } else if (cmd.action === 'toggle-cursor') {
+        setHideCursor(h => !h)
       }
     }).subscribe()
     return () => { supabase.removeChannel(ch) }
@@ -234,7 +237,14 @@ export default function DisplayPage() {
 
   return (
     <>
-      <style>{`nextjs-portal { display: none !important; }`}</style>
+      <style>{`
+        nextjs-portal { display: none !important; }
+        ${hideCursor ? `
+          /* !important and the universal selector because the wall sets its own
+             grab/grabbing cursors on the stage and cards. */
+          html, body, * { cursor: none !important; }
+        ` : ''}
+      `}</style>
       {/* A sibling of the wrapper so it stays above the fullscreen overlay, but
           given the same transform so it reads correctly on the turned panel. */}
       {debug.length > 0 && (

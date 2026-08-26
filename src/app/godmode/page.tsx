@@ -47,6 +47,7 @@ export default function GodMode() {
   const handleToggleRulers = () => send({ action: 'toggle-rulers' })
   const handleToggleCanvasVideo = () => send({ action: 'toggle-canvas-video' })
   const handleToggleDebug = () => send({ action: 'toggle-debug' })
+  const handleToggleCursor = () => send({ action: 'toggle-cursor' })
 
   // Clips uploaded before pre-rotation existed have no rotated copy. Building
   // them has to happen in a browser (ffmpeg runs client-side here), so it is a
@@ -118,6 +119,11 @@ export default function GodMode() {
           style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
                    padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
           ⟳▤
+        </button>
+        <button onClick={handleToggleCursor} title="Visa/dölj muspekaren på display"
+          style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
+                   padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
+          ⌖
         </button>
         <button onClick={handleToggleRulers} title="Visa/dölj linjaler"
           style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,

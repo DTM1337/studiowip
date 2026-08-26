@@ -67,12 +67,14 @@ interface Props {
   externalSelectedPostId?: string | null
   /** Paint videos through a <canvas> so they survive a CSS-rotated page. */
   canvasVideo?: boolean
+  /** Skip the fullscreen view for videos; something outside is drawing it. */
+  suppressFullscreenVideo?: boolean
 }
 
 type LivePositions = Record<string, { x: number; y: number }>
 type LiveSizes = Record<string, number>
 
-export default function CreativeWall({ initialPosts, uploaderName, displayMode = false, onViewChange, externalView, onSelectPost, externalSelectedPostId, canvasVideo = false }: Props) {
+export default function CreativeWall({ initialPosts, uploaderName, displayMode = false, onViewChange, externalView, onSelectPost, externalSelectedPostId, canvasVideo = false, suppressFullscreenVideo = false }: Props) {
   const [posts, setPosts]                 = useState<Post[]>(initialPosts)
   const [selectedPost, setSelectedPost]   = useState<Post | null>(null)
   const [focusedPost, setFocusedPost]     = useState<Post | null>(null)
@@ -490,6 +492,9 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         const isExternal = !selectedPost && !!externalSelectedPostId
         if (!lbPost) return null
         if (!isExternal && displayMode) return null
+        // A rotated display draws fullscreen video in its own overlay; letting
+        // this render too would put a second element on the same clip.
+        if (suppressFullscreenVideo && lbPost.file_type === 'video') return null
         return (
           <div className="lightbox" onClick={() => !isExternal && setSelectedPost(null)}>
             {!isExternal && <button className="lb-delete" onClick={(e) => { e.stopPropagation(); handleDelete(lbPost) }}>🗑 Ta bort</button>}

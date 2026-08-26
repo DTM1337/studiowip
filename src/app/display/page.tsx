@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import CreativeWall from '@/components/CreativeWall'
+import RotatedVideoOverlay from '@/components/RotatedVideoOverlay'
 import Rulers from '@/components/Rulers'
 import { Post } from '@/types'
 import { supabase } from '@/lib/supabase'
@@ -106,8 +107,14 @@ export default function DisplayPage() {
     return () => { supabase.removeChannel(ch) }
   }, [])
 
+  // Rotation is applied to this wrapper rather than to <html>, so that the
+  // fullscreen video overlay can be a sibling and stay outside the transform.
+  const stageRef = useRef<HTMLDivElement>(null)
+  const debugRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
-    const html = document.documentElement
+    const stage = stageRef.current
+    if (!stage) return
     const body = document.body
     const styleEl = document.createElement('style')
     document.head.appendChild(styleEl)
@@ -116,19 +123,30 @@ export default function DisplayPage() {
       const vw = window.innerWidth
       const vh = window.innerHeight
 
-      html.style.cssText = ''
-      body.style.cssText = ''
+      stage.style.cssText = ''
+      body.style.overflow = 'hidden'
       styleEl.textContent = ''
-      if (rotation === 0) return
+      if (debugRef.current) debugRef.current.style.transform = ''
+
+      stage.style.position = 'fixed'
+      stage.style.top = '0'
+      stage.style.left = '0'
+      stage.style.overflow = 'hidden'
+
+      if (rotation === 0) {
+        stage.style.width = `${vw}px`
+        stage.style.height = `${vh}px`
+        return
+      }
 
       const quarter = rotation === 90 || rotation === 270
-      // Page box dimensions before rotation: swapped for 90/270.
+      // Wrapper box before rotation: sides swapped for a quarter turn.
       const W = quarter ? vh : vw
       const H = quarter ? vw : vh
 
       // transform-origin 0 0, rotate() maps (x,y):
-      //   90°  → (-y, x)  ⇒ bbox x ∈ [-H,0] ⇒ shift right by H (= vw)
-      //   270° → ( y,-x)  ⇒ bbox y ∈ [-W,0] ⇒ shift down  by W (= vh)
+      //   90°  → (-y, x)  ⇒ bbox x ∈ [-H,0] ⇒ shift right by H
+      //   270° → ( y,-x)  ⇒ bbox y ∈ [-W,0] ⇒ shift down  by W
       //   180° → (-x,-y)  ⇒ shift right by W and down by H
       const transforms: Record<number, string> = {
         90:  `translateX(${H}px) rotate(90deg)`,
@@ -136,18 +154,21 @@ export default function DisplayPage() {
         270: `translateY(${W}px) rotate(270deg)`,
       }
 
-      html.style.transformOrigin = '0 0'
-      html.style.transform = transforms[rotation]
-      html.style.width = `${W}px`
-      html.style.height = `${H}px`
-      html.style.overflow = 'hidden'
-      body.style.overflow = 'hidden'
+      stage.style.width = `${W}px`
+      stage.style.height = `${H}px`
+      stage.style.transformOrigin = '0 0'
+      stage.style.transform = transforms[rotation]
 
-      // CSS vw/vh units always resolve against the real viewport, not the
-      // resized <html> box — so every 100vw/100vh rule has to be overridden
-      // with the rotated page dimensions or the layout overflows and clips.
+      const dbg = debugRef.current
+      if (dbg) {
+        dbg.style.transformOrigin = '0 0'
+        dbg.style.transform = transforms[rotation]
+      }
+
+      // CSS vw/vh units always resolve against the real viewport, never the
+      // wrapper — so every 100vw/100vh rule has to be overridden with the
+      // rotated dimensions or the layout overflows and clips.
       styleEl.textContent = `
-        html, body { width: ${W}px !important; height: ${H}px !important; }
         .wall-root { width: ${W}px !important; height: ${H}px !important; min-height: ${H}px !important; }
         .wall-stage { width: ${W}px !important; height: ${H}px !important; }
       `
@@ -158,10 +179,17 @@ export default function DisplayPage() {
     return () => {
       window.removeEventListener('resize', apply)
       styleEl.remove()
-      html.style.cssText = ''
-      body.style.cssText = ''
+      stage.style.cssText = ''
+      body.style.overflow = ''
     }
-  }, [rotation])
+  }, [rotation, showDebug])
+
+  const fullscreenPost = externalSelectedPostId
+    ? posts.find(p => p.id === externalSelectedPostId) ?? null
+    : null
+  // Only a rotated display needs the overlay; unrotated, the wall's own
+  // fullscreen view is already correct and cheaper.
+  const useVideoOverlay = rotation !== 0 && fullscreenPost?.file_type === 'video'
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#efefef', display: 'flex',
@@ -178,8 +206,10 @@ export default function DisplayPage() {
   return (
     <>
       <style>{`nextjs-portal { display: none !important; }`}</style>
+      {/* A sibling of the wrapper so it stays above the fullscreen overlay, but
+          given the same transform so it reads correctly on the turned panel. */}
       {debug.length > 0 && (
-        <div style={{
+        <div ref={debugRef} style={{
           position: 'fixed', top: 0, left: 0, zIndex: 9999,
           background: 'rgba(0,0,0,.85)', color: '#0f0', padding: '10px 14px',
           font: '13px ui-monospace, Menlo, monospace', lineHeight: 1.5,
@@ -188,12 +218,17 @@ export default function DisplayPage() {
           {debug.join('\n')}
         </div>
       )}
-      {showRulers && (
-        <Rulers pan={externalView?.pan ?? { x: 0, y: 0 }} zoom={externalView?.zoom ?? 1} />
+      <div ref={stageRef}>
+        {showRulers && (
+          <Rulers pan={externalView?.pan ?? { x: 0, y: 0 }} zoom={externalView?.zoom ?? 1} />
+        )}
+        <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
+          externalView={externalView} externalSelectedPostId={externalSelectedPostId}
+          canvasVideo={canvasVideo} suppressFullscreenVideo={useVideoOverlay} />
+      </div>
+      {useVideoOverlay && fullscreenPost && (
+        <RotatedVideoOverlay src={fullscreenPost.file_url} rotation={rotation} />
       )}
-      <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
-        externalView={externalView} externalSelectedPostId={externalSelectedPostId}
-        canvasVideo={canvasVideo} />
     </>
   )
 }

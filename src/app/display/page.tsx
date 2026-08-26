@@ -15,10 +15,11 @@ export default function DisplayPage() {
   const [externalSelectedPostId, setExternalSelectedPostId] = useState<string | null>(null)
   const [rotation, setRotation] = useState(0)
   const [showRulers, setShowRulers] = useState(false)
-  // Off by default: canvas rendering costs a decode plus a full-resolution
-  // frame copy per video, which a TV may not have headroom for. Turned on
-  // explicitly from GodMode so a plain reload always lands on the light path.
-  const [canvasVideo, setCanvasVideo] = useState(false)
+  // Tizen keeps decoded frames where drawImage cannot reach them, so canvas
+  // rendering is dead for video and the ▣ button now switches the fullscreen
+  // overlay between rotating the element and leaving it untransformed — the
+  // one remaining question about how the panel treats a <video>.
+  const [plainVideo, setPlainVideo] = useState(false)
   const [debug, setDebug] = useState<string[]>([])
   // Toggled from GodMode so nothing has to be typed on a TV remote; the query
   // param stays as a way to have it on from the first paint.
@@ -48,8 +49,10 @@ export default function DisplayPage() {
       const c = cmdLog.current
       const ago = c.at ? `${Math.round((Date.now() - c.at) / 1000)}s` : '-'
       const subs = supabase.getChannels().filter(ch => ch.topic.endsWith(CHANNEL)).length
+      const fs = document.documentElement.dataset.fsVideo
       setDebug([
-        `rot=${rotation} canvasMode=${canvasVideo} canvas=${rows.length} video=${vids}`,
+        `rot=${rotation} plainMode=${plainVideo} canvas=${rows.length} video=${vids}`,
+        ...(fs ? [`FS ${fs}`] : []),
         `cmds=${c.total} rotates=${c.rotates} last=${c.last} ${ago} ago subs=${subs}`,
         ...c.recent.map(r => `  ${r}`),
         ...rows,
@@ -58,7 +61,7 @@ export default function DisplayPage() {
     tick()
     const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
-  }, [rotation, canvasVideo, showDebug])
+  }, [rotation, plainVideo, showDebug])
 
   useEffect(() => {
     fetch('/api/posts')
@@ -99,7 +102,7 @@ export default function DisplayPage() {
       } else if (cmd.action === 'toggle-rulers') {
         setShowRulers(r => !r)
       } else if (cmd.action === 'toggle-canvas-video') {
-        setCanvasVideo(v => !v)
+        setPlainVideo(v => !v)
       } else if (cmd.action === 'toggle-debug') {
         setShowDebug(d => !d)
       }
@@ -224,10 +227,11 @@ export default function DisplayPage() {
         )}
         <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
           externalView={externalView} externalSelectedPostId={externalSelectedPostId}
-          canvasVideo={canvasVideo} suppressFullscreenVideo={useVideoOverlay} />
+          suppressFullscreenVideo={useVideoOverlay} />
       </div>
       {useVideoOverlay && fullscreenPost && (
-        <RotatedVideoOverlay src={fullscreenPost.file_url} rotation={rotation} />
+        <RotatedVideoOverlay src={fullscreenPost.file_url} rotation={rotation}
+          rotateElement={!plainVideo} />
       )}
     </>
   )

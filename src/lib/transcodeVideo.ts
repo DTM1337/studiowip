@@ -7,8 +7,12 @@ let loaded = false
 async function getFFmpeg(): Promise<FFmpeg> {
   if (ffmpeg && loaded) return ffmpeg
   ffmpeg = new FFmpeg()
-  // Use single-thread core (no SharedArrayBuffer / COEP required)
-  const baseURL = 'https://unpkg.com/@ffmpeg/core-st@0.12.6/dist/umd'
+  // @ffmpeg/core is the single-threaded build and needs no SharedArrayBuffer,
+  // so it works without the COEP headers that broke cross-origin images.
+  // (@ffmpeg/core-mt is the one that requires them; @ffmpeg/core-st does not
+  // exist at all — pointing at it returned 400 and silently disabled every
+  // transcode.) Pinned to the version in package.json.
+  const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd'
   await ffmpeg.load({
     coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
     wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),

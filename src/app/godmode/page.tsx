@@ -59,6 +59,9 @@ export default function GodMode() {
     const { rotatedVariantUrl } = await import('@/lib/rotatedVariant')
     const { rotateVideo90 } = await import('@/lib/transcodeVideo')
     let done = 0, skipped = 0, failed = 0
+    // Kept and shown: a silent catch here once reported three failures with no
+    // hint that the cause was a bad ffmpeg URL.
+    let reason = ''
 
     for (const [i, post] of videos.entries()) {
       setBackfill(`${i + 1}/${videos.length}…`)
@@ -67,20 +70,29 @@ export default function GodMode() {
         if (existing.ok) { skipped++; continue }
 
         const original = await fetch(post.file_url)
-        if (!original.ok) { failed++; continue }
+        if (!original.ok) throw new Error(`hämtning ${original.status}`)
         const blob = await original.blob()
-        const rotated = await rotateVideo90(new File([blob], 'in.mp4', { type: 'video/mp4' }))
+        const rotated = await rotateVideo90(
+          new File([blob], 'in.mp4', { type: 'video/mp4' }),
+          r => setBackfill(`${i + 1}/${videos.length} — ${Math.round(r * 100)}%`),
+        )
 
         const form = new FormData()
         form.append('file', rotated)
         form.append('originalUrl', post.file_url)
         const res = await fetch('/api/upload-rotated', { method: 'POST', body: form })
-        res.ok ? done++ : failed++
-      } catch {
+        if (!res.ok) throw new Error(`uppladdning ${res.status}`)
+        done++
+      } catch (e) {
         failed++
+        if (!reason) reason = e instanceof Error ? e.message : String(e)
+        console.error('Backfill failed for', post.file_url, e)
       }
     }
-    setBackfill(`Klart: ${done} nya, ${skipped} fanns, ${failed} misslyckades`)
+    setBackfill(
+      `Klart: ${done} nya, ${skipped} fanns, ${failed} misslyckades` +
+      (reason ? ` — ${reason}` : ''),
+    )
   }
 
   if (loading) return (

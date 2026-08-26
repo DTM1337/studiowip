@@ -1,35 +1,42 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { rotatedVariantUrl } from '@/lib/rotatedVariant'
 
 type Props = {
   src: string
-  /** Degrees the display is rotated by; the frame is rotated to match. */
+  /** Degrees the display is rotated by. */
   rotation: number
-  /**
-   * false renders the clip with no transform at all. It will look sideways on
-   * a turned panel, but it isolates whether the element is positioned and
-   * sized correctly, independent of whether rotation is honoured.
-   */
-  rotateElement: boolean
+  /** Skip the pre-rotated file and fall back to CSS, for comparing the two. */
+  forceOriginal: boolean
 }
 
 /**
  * Fullscreen video for a rotated display.
  *
- * Canvas is not an option here: Samsung Tizen keeps hardware-decoded frames in
- * a surface that drawImage cannot read, so the canvas paints but stays empty —
- * confirmed on the panel with a test marker that rendered while the video did
- * not.
+ * Rotation is baked into the file rather than applied at playback. Samsung
+ * Tizen ignores CSS transforms on a <video> — inherited or on the element —
+ * and keeps decoded frames where drawImage cannot read them, so every
+ * playback-time approach failed on the panel. A pre-rotated file needs none of
+ * them: the element is never transformed, so nothing depends on how the
+ * browser composites video.
  *
- * So this uses a real <video>, deliberately placed outside the rotated wrapper
- * so it inherits no ancestor transform, and rotates the element itself. A
- * transform on the video element is a different case from one on an ancestor,
- * and engines that ignore the latter often still honour the former.
+ * Uploads made before the variant existed have none, so a missing file falls
+ * back to the original plus a CSS rotation — correct in a desktop browser,
+ * wrong on the TV, but better than not playing.
  */
-export default function RotatedVideoOverlay({ src, rotation, rotateElement }: Props) {
+export default function RotatedVideoOverlay({ src, rotation, forceOriginal }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
+
+  // Only a quarter turn clockwise has a baked variant; anything else has to
+  // fall back to transforming the element.
+  const canUseVariant = rotation === 90 && !forceOriginal
+  const [useVariant, setUseVariant] = useState(canUseVariant)
+
+  useEffect(() => { setUseVariant(canUseVariant) }, [canUseVariant, src])
+
+  const playbackSrc = useVariant ? rotatedVariantUrl(src) : src
 
   useEffect(() => {
     const video = videoRef.current
@@ -43,21 +50,34 @@ export default function RotatedVideoOverlay({ src, rotation, rotateElement }: Pr
       const vh = window.innerHeight
       const quarter = rotation === 90 || rotation === 270
 
-      // Sized in viewer space: for a quarter turn the element is portrait, and
-      // once rotated its screen box is exactly the viewport again.
+      if (useVariant) {
+        // The picture is already turned, so the element is laid out plainly and
+        // left untransformed — the whole point of the baked variant.
+        box.style.width = `${vw}px`
+        box.style.height = `${vh}px`
+        box.style.left = '0px'
+        box.style.top = '0px'
+        box.style.transform = ''
+        return
+      }
+
       const w = quarter ? vh : vw
       const h = quarter ? vw : vh
-
       box.style.width = `${w}px`
       box.style.height = `${h}px`
       box.style.left = `${(vw - w) / 2}px`
       box.style.top = `${(vh - h) / 2}px`
       box.style.transformOrigin = 'center center'
-      box.style.transform = rotateElement ? `rotate(${rotation}deg)` : ''
+      box.style.transform = `rotate(${rotation}deg)`
     }
 
     layout()
     window.addEventListener('resize', layout)
+
+    // A missing variant surfaces as a media error; drop to the original rather
+    // than leaving a black screen.
+    const onError = () => { if (useVariant) setUseVariant(false) }
+    video.addEventListener('error', onError)
 
     const kick = () => { video.play().catch(() => {}) }
     video.addEventListener('loadedmetadata', kick)
@@ -71,7 +91,7 @@ export default function RotatedVideoOverlay({ src, rotation, rotateElement }: Pr
       if (video.paused) video.play().catch(() => {})
       const r = box.getBoundingClientRect()
       document.documentElement.dataset.fsVideo =
-        `mode=${rotateElement ? 'rot' : 'plain'} ready=${video.readyState}` +
+        `src=${useVariant ? 'rot90' : 'original'} ready=${video.readyState}` +
         ` paused=${video.paused} t=${video.currentTime.toFixed(1)}` +
         ` nat=${video.videoWidth}x${video.videoHeight}` +
         ` box=${Math.round(r.width)}x${Math.round(r.height)}` +
@@ -82,20 +102,22 @@ export default function RotatedVideoOverlay({ src, rotation, rotateElement }: Pr
       stopped = true
       window.clearInterval(watchdog)
       window.removeEventListener('resize', layout)
+      video.removeEventListener('error', onError)
       video.removeEventListener('loadedmetadata', kick)
       video.removeEventListener('loadeddata', kick)
       video.removeEventListener('canplay', kick)
       video.removeEventListener('pause', kick)
       delete document.documentElement.dataset.fsVideo
     }
-  }, [src, rotation, rotateElement])
+  }, [playbackSrc, rotation, useVariant])
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: '#000', overflow: 'hidden' }}>
       <div ref={boxRef} style={{ position: 'absolute' }}>
         <video
+          key={playbackSrc}
           ref={videoRef}
-          src={src}
+          src={playbackSrc}
           muted
           loop
           playsInline

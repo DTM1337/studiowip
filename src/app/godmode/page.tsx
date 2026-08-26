@@ -9,6 +9,7 @@ import { CHANNEL } from '@/lib/displayChannel'
 export default function GodMode() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
+  const [backfill, setBackfill] = useState<string | null>(null)
   const throttle = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastView = useRef({ pan: { x: 0, y: 0 }, zoom: 1 })
   const channel = useRef(supabase.channel(CHANNEL))
@@ -47,6 +48,41 @@ export default function GodMode() {
   const handleToggleCanvasVideo = () => send({ action: 'toggle-canvas-video' })
   const handleToggleDebug = () => send({ action: 'toggle-debug' })
 
+  // Clips uploaded before pre-rotation existed have no rotated copy. Building
+  // them has to happen in a browser (ffmpeg runs client-side here), so it is a
+  // deliberate one-off action rather than something the display triggers.
+  const handleBackfill = async () => {
+    const videos = posts.filter(p => p.file_type === 'video')
+    if (!videos.length) { setBackfill('Inga filmer'); return }
+    if (!confirm(`Skapa roterade versioner för ${videos.length} filmer? Det tar en stund.`)) return
+
+    const { rotatedVariantUrl } = await import('@/lib/rotatedVariant')
+    const { rotateVideo90 } = await import('@/lib/transcodeVideo')
+    let done = 0, skipped = 0, failed = 0
+
+    for (const [i, post] of videos.entries()) {
+      setBackfill(`${i + 1}/${videos.length}…`)
+      try {
+        const existing = await fetch(rotatedVariantUrl(post.file_url), { method: 'HEAD' })
+        if (existing.ok) { skipped++; continue }
+
+        const original = await fetch(post.file_url)
+        if (!original.ok) { failed++; continue }
+        const blob = await original.blob()
+        const rotated = await rotateVideo90(new File([blob], 'in.mp4', { type: 'video/mp4' }))
+
+        const form = new FormData()
+        form.append('file', rotated)
+        form.append('originalUrl', post.file_url)
+        const res = await fetch('/api/upload-rotated', { method: 'POST', body: form })
+        res.ok ? done++ : failed++
+      } catch {
+        failed++
+      }
+    }
+    setBackfill(`Klart: ${done} nya, ${skipped} fanns, ${failed} misslyckades`)
+  }
+
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#efefef', display: 'flex',
                   alignItems: 'center', justifyContent: 'center',
@@ -58,7 +94,19 @@ export default function GodMode() {
   return (
     <>
       <CreativeWall initialPosts={posts} uploaderName="GodMode" onViewChange={handleViewChange} onSelectPost={handleSelectPost} />
-      <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, display: 'flex', gap: 10 }}>
+      <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+                    display: 'flex', gap: 10, alignItems: 'center' }}>
+        {backfill && (
+          <span style={{ background: 'rgba(0,0,0,.8)', color: '#fff', borderRadius: 10,
+                         padding: '8px 12px', fontSize: 12, fontFamily: 'system-ui' }}>
+            {backfill}
+          </span>
+        )}
+        <button onClick={handleBackfill} title="Skapa roterade versioner av alla filmer (engångsjobb)"
+          style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
+                   padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
+          ⟳▤
+        </button>
         <button onClick={handleToggleRulers} title="Visa/dölj linjaler"
           style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
                    padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>

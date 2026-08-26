@@ -231,7 +231,7 @@ export default function DisplayPage() {
       </div>
       {useVideoOverlay && fullscreenPost && (
         <RotatedVideoOverlay src={fullscreenPost.file_url} rotation={rotation}
-          rotateElement={!plainVideo} />
+          forceOriginal={plainVideo} />
       )}
     </>
   )

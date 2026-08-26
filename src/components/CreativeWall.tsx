@@ -195,12 +195,21 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
       if (file.size > 500 * 1024 * 1024) { alert('Max 500MB per fil'); continue }
 
       let fileToUpload = file
+      let rotatedFile: File | null = null
       const isVideo = file.type.startsWith('video/')
 
       if (isVideo) {
         try {
-          const { transcodeToH264 } = await import('@/lib/transcodeVideo')
+          const { transcodeToH264, rotateVideo90 } = await import('@/lib/transcodeVideo')
           fileToUpload = await transcodeToH264(file)
+          // A rotated display cannot rotate video at playback time on a TV, so
+          // a pre-rotated copy is made here. Failing to build it only costs
+          // correct rotation on the display, so it must not fail the upload.
+          try {
+            rotatedFile = await rotateVideo90(fileToUpload)
+          } catch (e) {
+            console.warn('Rotated variant failed, display will use the original:', e)
+          }
         } catch (e) {
           console.warn('Transcoding failed, uploading original:', e)
         }
@@ -208,6 +217,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
 
       const form = new FormData()
       form.append('file', fileToUpload)
+      if (rotatedFile) form.append('fileRot90', rotatedFile)
       const mediaRes = await fetch('/api/upload-media', { method: 'POST', body: form })
       if (!mediaRes.ok) {
         const { error } = await mediaRes.json().catch(() => ({ error: 'Upload failed' }))

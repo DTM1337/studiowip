@@ -83,8 +83,22 @@ export async function POST(req: NextRequest) {
       .from('media')
       .upload(fileName, buffer, { contentType: file.type, upsert: false })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    // Optional pre-rotated copy, stored beside the original under the same id
+    // so the display can derive its URL without a schema change. Its absence is
+    // not an error: the display falls back to the unrotated file.
+    const rotated = formData.get('fileRot90') as File | null
+    let rotatedUploaded = false
+    if (rotated) {
+      const rotBuffer = Buffer.from(await rotated.arrayBuffer())
+      const { error: rotError } = await supabaseAdmin.storage
+        .from('media')
+        .upload(`${id}-rot90.mp4`, rotBuffer, { contentType: 'video/mp4', upsert: true })
+      rotatedUploaded = !rotError
+    }
+
     const { data: { publicUrl } } = supabaseAdmin.storage.from('media').getPublicUrl(fileName)
-    return NextResponse.json({ url: publicUrl, fileType: 'video', transcoded: false })
+    return NextResponse.json({ url: publicUrl, fileType: 'video', transcoded: false, rotatedUploaded })
   } else {
     const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
     const fileName = `${randomUUID()}.${ext}`

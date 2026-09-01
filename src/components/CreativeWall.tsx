@@ -64,6 +64,26 @@ const MAX_ZOOM = 3
 const MAX_UPLOAD_MB = 20
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
+/**
+ * Uploads to a signed storage URL, reporting how much has gone out.
+ *
+ * XHR rather than the supabase client, which uses fetch internally and so
+ * cannot report upload progress at all.
+ */
+function putSigned(signedUrl: string, file: File, onProgress: (ratio: number) => void) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', signedUrl)
+    xhr.setRequestHeader('content-type', file.type || 'application/octet-stream')
+    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total) }
+    xhr.onload = () => xhr.status >= 200 && xhr.status < 300
+      ? resolve()
+      : reject(new Error(`HTTP ${xhr.status}`))
+    xhr.onerror = () => reject(new Error('Nätverksfel'))
+    xhr.send(file)
+  })
+}
+
 interface Props {
   initialPosts: Post[]
   uploaderName: string
@@ -102,6 +122,9 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
   const [focusedPost, setFocusedPost]     = useState<Post | null>(null)
   const [isFileDrag, setIsFileDrag]       = useState(false)
   const [uploading, setUploading]         = useState(false)
+  // What the upload is doing and how far along, so a multi-minute transcode is
+  // not represented by a motionless "Laddar upp…".
+  const [progress, setProgress]           = useState<{ label: string; pct: number } | null>(null)
   const [uploadName, setUploadName]       = useState(uploaderName)
   const [caption, setCaption]             = useState('')
   const [livePositions, setLivePositions] = useState<LivePositions>({})
@@ -211,7 +234,13 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
     const list = Array.from(files)
     if (!list.length) return
     setUploading(true)
-    for (const file of list) {
+    for (const [index, file] of list.entries()) {
+      const many = list.length > 1 ? ` (${index + 1}/${list.length})` : ''
+      // Phases are given fixed shares of the bar so it only ever moves forward.
+      // Transcoding dominates by far, so it gets most of the range.
+      const step = (label: string, from: number, to: number, ratio = 1) =>
+        setProgress({ label: label + many, pct: Math.round(from + (to - from) * ratio) })
+
       if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
         alert(`Filtyp stöds ej: ${file.type}`); continue
       }
@@ -225,13 +254,14 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
 
       if (isVideo) {
         try {
+          step('Förbereder film', 0, 0)
           const { transcodeToH264, rotateVideo90 } = await import('@/lib/transcodeVideo')
-          fileToUpload = await transcodeToH264(file)
+          fileToUpload = await transcodeToH264(file, r => step('Konverterar film', 2, 50, r))
           // A rotated display cannot rotate video at playback time on a TV, so
           // a pre-rotated copy is made here. Failing to build it only costs
           // correct rotation on the display, so it must not fail the upload.
           try {
-            rotatedFile = await rotateVideo90(fileToUpload)
+            rotatedFile = await rotateVideo90(fileToUpload, r => step('Skapar roterad version', 50, 85, r))
           } catch (e) {
             console.warn('Rotated variant failed, display will use the original:', e)
           }
@@ -254,17 +284,23 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
       }
       const { upload, url: publicUrl, rotatedUpload } = await urlRes.json()
 
-      const put = await supabase.storage.from('media')
-        .uploadToSignedUrl(upload.path, upload.token, fileToUpload)
-      if (put.error) { alert(`Upload error: ${put.error.message}`); continue }
-
-      if (rotatedFile && rotatedUpload) {
-        const putRot = await supabase.storage.from('media')
-          .uploadToSignedUrl(rotatedUpload.path, rotatedUpload.token, rotatedFile)
-        // Only costs correct rotation on the display, so it must not fail the post.
-        if (putRot.error) console.warn('Rotated upload failed:', putRot.error.message)
+      const from = isVideo ? 85 : 0
+      try {
+        await putSigned(upload.signedUrl, fileToUpload, r => step('Laddar upp', from, isVideo ? 94 : 90, r))
+      } catch (e) {
+        alert(`Upload error: ${e instanceof Error ? e.message : e}`); continue
       }
 
+      if (rotatedFile && rotatedUpload) {
+        try {
+          await putSigned(rotatedUpload.signedUrl, rotatedFile, r => step('Laddar upp roterad', 94, 99, r))
+        } catch (e) {
+          // Only costs correct rotation on the display, so it must not fail the post.
+          console.warn('Rotated upload failed:', e)
+        }
+      }
+
+      step('Sparar', 99, 99)
       const fileType = isVideo ? 'video' : 'image'
 
       const res = await fetch('/api/upload', {
@@ -284,6 +320,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
     }
     setCaption('')
     setUploading(false)
+    setProgress(null)
   }, [uploadName, caption])
 
   useEffect(() => {
@@ -442,7 +479,19 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
       {!displayMode && (
         <header className="topbar">
           <div className="topbar-left">
-            <span className="zoom-hint">Scroll för att zooma · Dra bakgrunden för att panorera</span>
+            {progress ? (
+              <div className="upload-progress" role="status" aria-live="polite">
+                <div className="upload-progress-head">
+                  <span>{progress.label}</span>
+                  <span className="upload-progress-pct">{progress.pct}%</span>
+                </div>
+                <div className="upload-progress-track">
+                  <div className="upload-progress-fill" style={{ width: `${progress.pct}%` }} />
+                </div>
+              </div>
+            ) : (
+              <span className="zoom-hint">Scroll för att zooma · Dra bakgrunden för att panorera</span>
+            )}
           </div>
           <div className="topbar-right">
             <input
@@ -595,6 +644,19 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         }
         .topbar-left { display: flex; align-items: center; }
         .zoom-hint { font-size: 11px; color: #bbb; }
+        .upload-progress { width: 260px; }
+        .upload-progress-head {
+          display: flex; justify-content: space-between; align-items: baseline;
+          font-size: 11px; color: #666; margin-bottom: 5px;
+        }
+        .upload-progress-pct { font-variant-numeric: tabular-nums; color: #999; }
+        .upload-progress-track {
+          height: 4px; border-radius: 2px; background: rgba(0,0,0,.1); overflow: hidden;
+        }
+        .upload-progress-fill {
+          height: 100%; background: #111; border-radius: 2px;
+          transition: width .2s ease;
+        }
         .topbar-right { display: flex; align-items: center; gap: 8px; }
         .field {
           background: #fff; border: 1px solid rgba(0,0,0,.12);

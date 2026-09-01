@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       .createSignedUploadUrl(rotName, { upsert: true })
     if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 })
 
-    return NextResponse.json({ upload: { path: r.data.path, token: r.data.token } })
+    return NextResponse.json({ upload: { path: r.data.path, token: r.data.token, signedUrl: r.data.signedUrl } })
   }
 
   const safeExt = (ext ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin'
@@ -47,20 +47,20 @@ export async function POST(req: NextRequest) {
 
   const { data: { publicUrl } } = supabaseAdmin.storage.from('media').getPublicUrl(name)
 
-  let rotatedUpload: { path: string; token: string } | null = null
+  let rotatedUpload: { path: string; token: string; signedUrl: string } | null = null
   let rotatedUrl: string | null = null
   if (rotated) {
     const rotName = `${id}-rot90.mp4`
     const r = await supabaseAdmin.storage.from('media').createSignedUploadUrl(rotName)
     // Not fatal: without it the display falls back to the unrotated original.
     if (!r.error) {
-      rotatedUpload = { path: r.data.path, token: r.data.token }
+      rotatedUpload = { path: r.data.path, token: r.data.token, signedUrl: r.data.signedUrl }
       rotatedUrl = supabaseAdmin.storage.from('media').getPublicUrl(rotName).data.publicUrl
     }
   }
 
   return NextResponse.json({
-    upload: { path: main.data.path, token: main.data.token },
+    upload: { path: main.data.path, token: main.data.token, signedUrl: main.data.signedUrl },
     url: publicUrl,
     rotatedUpload,
     rotatedUrl,

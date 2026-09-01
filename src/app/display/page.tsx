@@ -39,21 +39,11 @@ export default function DisplayPage() {
     localStorage.setItem('display-rotation', String(rotation))
   }, [rotation])
 
-  // Read inside CanvasVideo's paint loop to draw its test marker, avoiding
-  // threading a debug-only prop through CreativeWall.
-  useEffect(() => {
-    document.documentElement.dataset.canvasDebug = showDebug ? '1' : '0'
-  }, [showDebug])
-
   // Reports what each video is actually doing on the TV, which cannot be
   // inspected any other way.
   useEffect(() => {
     if (!showDebug) { setDebug([]); return }
     const tick = () => {
-      const rows = [...document.querySelectorAll('canvas')].map((c, i) => {
-        const d = (c as HTMLCanvasElement).dataset
-        return `#${i} frames=${d.frames ?? '-'} ready=${d.ready ?? '-'} paused=${d.paused ?? '-'} t=${d.time ?? '-'} nat=${d.nat ?? '-'} buf=${d.buf ?? '-'} err=${d.err ?? '-'} draw=${d.draw ?? '-'}`
-      })
       const vids = document.querySelectorAll('video').length
       const c = cmdLog.current
       const ago = c.at ? `${Math.round((Date.now() - c.at) / 1000)}s` : '-'
@@ -64,7 +54,6 @@ export default function DisplayPage() {
         ...(fs ? [`FS ${fs}`] : []),
         `cmds=${c.total} rotates=${c.rotates} last=${c.last} ${ago} ago subs=${subs}`,
         ...c.recent.map(r => `  ${r}`),
-        ...rows,
       ])
     }
     tick()

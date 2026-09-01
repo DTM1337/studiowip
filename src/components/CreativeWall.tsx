@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Post } from '@/types'
-import CanvasVideo from './CanvasVideo'
 import LazyVideo from './LazyVideo'
 import { posterVariantUrl } from '@/lib/rotatedVariant'
 
@@ -47,8 +46,6 @@ interface Props {
   externalScroll?: number | null
   onSelectPost?: (postId: string | null) => void
   externalSelectedPostId?: string | null
-  /** Paint videos through a <canvas> so they survive a CSS-rotated page. */
-  canvasVideo?: boolean
   /** Skip the fullscreen view for videos; something outside is drawing it. */
   suppressFullscreenVideo?: boolean
   /**
@@ -62,7 +59,7 @@ interface Props {
 export default function CreativeWall({
   initialPosts, uploaderName, displayMode = false,
   onScrollChange, externalScroll, onSelectPost, externalSelectedPostId,
-  canvasVideo = false, suppressFullscreenVideo = false, onPostsChange,
+  suppressFullscreenVideo = false, onPostsChange,
 }: Props) {
   const [posts, setPosts]               = useState<Post[]>(initialPosts)
   const [selectedPost, setSelectedPost] = useState<Post | null>(null)
@@ -483,7 +480,6 @@ export default function CreativeWall({
                 key={post.id}
                 post={post}
                 displayMode={displayMode}
-                canvasVideo={canvasVideo}
                     aspect={aspects[post.id]}
                 onClick={() => handleCardClick(post)}
               />
@@ -517,9 +513,7 @@ export default function CreativeWall({
             {lbPost.file_type === 'image'
               // eslint-disable-next-line @next/next/no-img-element
               ? <img src={lbPost.file_url} alt={lbPost.caption ?? ''} />
-              : canvasVideo
-                ? <CanvasVideo src={lbPost.file_url} />
-                : <video src={lbPost.file_url} autoPlay loop playsInline muted controls={!isExternal} />
+              : <video src={lbPost.file_url} autoPlay loop playsInline muted controls={!isExternal} />
             }
             {!isExternal && (lbPost.uploader_name || lbPost.caption) && (
               <div className="lb-footer">
@@ -536,9 +530,7 @@ export default function CreativeWall({
           {focusedPost.file_type === 'image'
             // eslint-disable-next-line @next/next/no-img-element
             ? <img src={focusedPost.file_url} alt={focusedPost.caption ?? ''} />
-            : canvasVideo
-              ? <CanvasVideo src={focusedPost.file_url} />
-              : <video src={focusedPost.file_url} autoPlay loop playsInline muted />
+            : <video src={focusedPost.file_url} autoPlay loop playsInline muted />
           }
           <div className="show-only-hint">Klicka för att stänga</div>
         </div>
@@ -622,7 +614,7 @@ export default function CreativeWall({
           cursor: pointer;
           animation: fadeIn .2s ease;
         }
-        .lightbox img, .lightbox video, .lightbox canvas {
+        .lightbox img, .lightbox video {
           display: block; width: 100%; height: 100%;
           object-fit: contain; pointer-events: none;
         }
@@ -656,7 +648,7 @@ export default function CreativeWall({
           animation: fadeIn .3s ease;
         }
         @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
-        .show-only img, .show-only video, .show-only canvas {
+        .show-only img, .show-only video {
           max-width: 100%; max-height: 100%;
           object-fit: contain; display: block;
         }
@@ -673,12 +665,11 @@ export default function CreativeWall({
 interface CardProps {
   post: Post
   displayMode: boolean
-  canvasVideo: boolean
   aspect?: number
   onClick: () => void
 }
 
-function BoardCard({ post, displayMode, canvasVideo, aspect, onClick }: CardProps) {
+function BoardCard({ post, displayMode, aspect, onClick }: CardProps) {
   const isVideo = post.file_type === 'video'
   const [posterFailed, setPosterFailed] = useState(false)
 
@@ -702,9 +693,7 @@ function BoardCard({ post, displayMode, canvasVideo, aspect, onClick }: CardProp
             // No still frame yet — clips uploaded before posters existed, or
             // missed by the backfill. Playing it is the old behaviour and looks
             // right everywhere except a rotated TV.
-            ? (canvasVideo
-                ? <CanvasVideo src={post.file_url} />
-                : <LazyVideo src={post.file_url} />)
+            ? <LazyVideo src={post.file_url} />
             // eslint-disable-next-line @next/next/no-img-element
             : <img
                 src={posterVariantUrl(post.file_url)}
@@ -735,7 +724,7 @@ function BoardCard({ post, displayMode, canvasVideo, aspect, onClick }: CardProp
         .wall-card:hover { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); }
         .wall-card:not(.display-mode):hover { transform: translateY(-2px); }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
-        .card-media img, .card-media video, .card-media canvas {
+        .card-media img, .card-media video {
           width: 100%; height: 100%; object-fit: cover; display: block;
           transition: transform .45s ease; pointer-events: none;
         }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Post } from '@/types'
 import CanvasVideo from './CanvasVideo'
@@ -11,6 +11,10 @@ import LazyVideo from './LazyVideo'
 // the transport allows.
 const MAX_UPLOAD_MB = 20
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
+const COLUMN_WIDTH = 260
+const COLUMN_GAP = 18
+const BOARD_PADDING = 18
 
 /**
  * Uploads to a signed storage URL, reporting how much has gone out.
@@ -87,26 +91,32 @@ export default function CreativeWall({
   }, [selectedPost, focusedPost])
 
   /**
-   * Ratios for the video cards.
+   * Natural width/height per post.
    *
-   * A lazily loaded <video> has no intrinsic size until it starts loading, and
-   * a card whose clip is drawn by the external layer has no media element at
-   * all — either way the box would collapse without an explicit ratio.
+   * Needed twice over: a lazily loaded <video> has no intrinsic size until it
+   * loads and a card drawn by the external layer has no media element at all,
+   * so their boxes would collapse; and the column packing has to know how tall
+   * each card will be before placing it.
    */
-  const [videoAspects, setVideoAspects] = useState<Record<string, number>>({})
+  const [aspects, setAspects] = useState<Record<string, number>>({})
   useEffect(() => {
     let cancelled = false
+    const record = (id: string, w: number, h: number) => {
+      if (cancelled || !w || !h) return
+      setAspects(prev => prev[id] ? prev : { ...prev, [id]: w / h })
+    }
     for (const post of posts) {
-      if (post.file_type !== 'video' || videoAspects[post.id]) continue
-      const probe = document.createElement('video')
-      probe.preload = 'metadata'
-      probe.onloadedmetadata = () => {
-        if (cancelled || !probe.videoWidth || !probe.videoHeight) return
-        setVideoAspects(prev => prev[post.id]
-          ? prev
-          : { ...prev, [post.id]: probe.videoWidth / probe.videoHeight })
+      if (aspects[post.id]) continue
+      if (post.file_type === 'image') {
+        const img = new Image()
+        img.onload = () => record(post.id, img.naturalWidth, img.naturalHeight)
+        img.src = post.file_url
+      } else {
+        const probe = document.createElement('video')
+        probe.preload = 'metadata'
+        probe.onloadedmetadata = () => record(post.id, probe.videoWidth, probe.videoHeight)
+        probe.src = post.file_url
       }
-      probe.src = post.file_url
     }
     return () => { cancelled = true }
   }, [posts])
@@ -121,6 +131,104 @@ export default function CreativeWall({
     channel.subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [])
+
+  // Column width target; the count follows the container so the same rules
+  // suit a wide desk screen and the narrow portrait panel.
+  const [columnCount, setColumnCount] = useState(1)
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    const measure = () => {
+      const w = el.clientWidth - BOARD_PADDING * 2
+      setColumnCount(Math.max(1, Math.round((w + COLUMN_GAP) / (COLUMN_WIDTH + COLUMN_GAP))))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  /**
+   * Packs posts into columns, each one going to whichever column is shortest
+   * so far.
+   *
+   * CSS multi-column balances total height but cannot move a card once placed,
+   * so the tails came out ragged — one column ending a couple of hundred pixels
+   * above its neighbour. Placing them here keeps the bottom edge level.
+   *
+   * Heights are relative: every column is the same width, so 1/aspect is
+   * proportional to how tall a card will be.
+   */
+  const columns = useMemo(() => {
+    const heightOf = (post: Post) =>
+      1 / (aspects[post.id] ?? (post.file_type === 'video' ? 16 / 9 : 4 / 5))
+
+    const cols: Post[][] = Array.from({ length: columnCount }, () => [])
+    const heights: number[] = new Array(columnCount).fill(0)
+
+    for (const post of posts) {
+      let shortest = 0
+      for (let i = 1; i < columnCount; i++) {
+        if (heights[i] < heights[shortest]) shortest = i
+      }
+      cols[shortest].push(post)
+      heights[shortest] += heightOf(post)
+    }
+
+    // Placing each card in the shortest column still leaves the bottom edge
+    // ragged by up to a whole card, because the last few have nowhere better to
+    // go. This evens it out by moving a card across, or swapping a tall one for
+    // a shorter one, whenever that narrows the gap between the longest and
+    // shortest column. Only the gap is optimised, so the ordering stays broadly
+    // newest-first.
+    for (let pass = 0; pass < 60; pass++) {
+      let tallest = 0, shortest = 0
+      for (let i = 1; i < columnCount; i++) {
+        if (heights[i] > heights[tallest]) tallest = i
+        if (heights[i] < heights[shortest]) shortest = i
+      }
+      if (tallest === shortest) break
+
+      const gap = heights[tallest] - heights[shortest]
+      let best = { gain: 0, move: -1, swap: -1 }
+
+      for (let a = 0; a < cols[tallest].length; a++) {
+        const ha = heightOf(cols[tallest][a])
+        // Moving one across: the gap closes by twice its height, and overshoots
+        // once it is taller than the gap itself.
+        const gain = gap - Math.abs(gap - 2 * ha)
+        if (gain > best.gain) best = { gain, move: a, swap: -1 }
+
+        for (let b = 0; b < cols[shortest].length; b++) {
+          const diff = ha - heightOf(cols[shortest][b])
+          if (diff <= 0) continue
+          const swapGain = gap - Math.abs(gap - 2 * diff)
+          if (swapGain > best.gain) best = { gain: swapGain, move: a, swap: b }
+        }
+      }
+
+      // Anything below a hair of a card is not worth reordering for.
+      if (best.gain < 0.02) break
+
+      if (best.swap === -1) {
+        const [post] = cols[tallest].splice(best.move, 1)
+        const h = heightOf(post)
+        cols[shortest].push(post)
+        heights[tallest] -= h
+        heights[shortest] += h
+      } else {
+        const from = cols[tallest][best.move]
+        const to = cols[shortest][best.swap]
+        cols[tallest][best.move] = to
+        cols[shortest][best.swap] = from
+        const diff = heightOf(from) - heightOf(to)
+        heights[tallest] -= diff
+        heights[shortest] += diff
+      }
+    }
+
+    return cols
+  }, [posts, aspects, columnCount])
 
   const emitScroll = () => {
     const el = rootRef.current
@@ -344,16 +452,20 @@ export default function CreativeWall({
       )}
 
       <div className="board" style={{ paddingTop: displayMode ? 20 : 73 }}>
-        {posts.map((post) => (
-          <BoardCard
-            key={post.id}
-            post={post}
-            displayMode={displayMode}
-            canvasVideo={canvasVideo}
-            externalVideoLayer={externalVideoLayer}
-            videoAspect={videoAspects[post.id]}
-            onClick={() => handleCardClick(post)}
-          />
+        {columns.map((col, i) => (
+          <div className="board-col" key={i}>
+            {col.map((post) => (
+              <BoardCard
+                key={post.id}
+                post={post}
+                displayMode={displayMode}
+                canvasVideo={canvasVideo}
+                externalVideoLayer={externalVideoLayer}
+                aspect={aspects[post.id]}
+                onClick={() => handleCardClick(post)}
+              />
+            ))}
+          </div>
         ))}
       </div>
 
@@ -416,14 +528,17 @@ export default function CreativeWall({
           scrollbar-width: none;
         }
         .wall-root::-webkit-scrollbar { display: none; }
-        /* Multi-column is what gives the staggered board: each card keeps its
-           own height and the columns fill independently. column-width rather
-           than a count so the same rules suit a wide desk screen and the
-           narrow portrait panel. */
+        /* Columns are packed in JS rather than by CSS multi-column, which
+           cannot even out the bottom edge. See the columns memo. */
         .board {
-          column-width: 260px;
-          column-gap: 18px;
-          padding: 0 18px 24px;
+          display: flex;
+          align-items: flex-start;
+          gap: ${COLUMN_GAP}px;
+          padding: 0 ${BOARD_PADDING}px 24px;
+        }
+        .board-col {
+          flex: 1; min-width: 0;
+          display: flex; flex-direction: column; gap: ${COLUMN_GAP}px;
         }
         .topbar {
           position: fixed; top: 0; left: 0; right: 0; z-index: 100;
@@ -537,11 +652,11 @@ interface CardProps {
   displayMode: boolean
   canvasVideo: boolean
   externalVideoLayer: boolean
-  videoAspect?: number
+  aspect?: number
   onClick: () => void
 }
 
-function BoardCard({ post, displayMode, canvasVideo, externalVideoLayer, videoAspect, onClick }: CardProps) {
+function BoardCard({ post, displayMode, canvasVideo, externalVideoLayer, aspect, onClick }: CardProps) {
   const isVideo = post.file_type === 'video'
 
   return (
@@ -555,10 +670,11 @@ function BoardCard({ post, displayMode, canvasVideo, externalVideoLayer, videoAs
         // Measured from outside to place this card's video in the unrotated
         // layer; see externalVideoLayer.
         data-video-card={isVideo && externalVideoLayer ? post.id : undefined}
-        // Images size themselves from the file, but a lazily loaded or
-        // externally drawn video has no intrinsic height, so its ratio has to
-        // be supplied. 16/9 is only the placeholder until the real one is read.
-        style={isVideo ? { aspectRatio: String(videoAspect ?? 16 / 9) } : undefined}
+        // Reserving the box from the measured ratio keeps the packing honest:
+        // if a card grew after placement the column heights would no longer
+        // match what they were packed against. The fallbacks apply only until
+        // the real ratio is read.
+        style={{ aspectRatio: String(aspect ?? (isVideo ? 16 / 9 : 4 / 5)) }}
       >
         {post.file_type === 'image'
           // eslint-disable-next-line @next/next/no-img-element
@@ -588,12 +704,7 @@ function BoardCard({ post, displayMode, canvasVideo, externalVideoLayer, videoAs
 
       <style>{`
         .wall-card {
-          /* A column box must not be split down the middle by a column break. */
-          break-inside: avoid;
-          -webkit-column-break-inside: avoid;
-          display: block;
-          width: 100%;
-          margin: 0 0 18px;
+          display: block; width: 100%;
           cursor: pointer; border-radius: 22px;
           background: #fff; border: 1px solid rgba(0,0,0,.08);
           box-shadow: 0 4px 20px rgba(0,0,0,.13), 0 1px 4px rgba(0,0,0,.06);
@@ -606,11 +717,7 @@ function BoardCard({ post, displayMode, canvasVideo, externalVideoLayer, videoAs
            which a layer above the wall could not allow. */
         .wall-card.external-video { background: transparent; }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
-        .card-media img {
-          width: 100%; height: auto; display: block;
-          transition: transform .45s ease; pointer-events: none;
-        }
-        .card-media video, .card-media canvas {
+        .card-media img, .card-media video, .card-media canvas {
           width: 100%; height: 100%; object-fit: cover; display: block;
           transition: transform .45s ease; pointer-events: none;
         }

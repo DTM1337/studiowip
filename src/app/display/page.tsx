@@ -203,7 +203,10 @@ export default function DisplayPage() {
       stage.style.cssText = ''
       body.style.overflow = ''
     }
-  }, [rotation, showDebug])
+    // `loading` matters: the page shows a loading screen first, so the wrapper
+    // this effect styles does not exist on the first runs. Without it a
+    // rotation restored from storage was silently dropped.
+  }, [rotation, showDebug, loading])
 
   // Only a quarter turn clockwise has pre-rotated files, so only then can card
   // videos move to the unrotated layer; otherwise they stay in the wall.

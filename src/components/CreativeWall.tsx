@@ -769,7 +769,8 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
   return (
     <article
       ref={cardRef as React.RefObject<HTMLElement>}
-      className={`wall-card ${isLive ? 'is-live' : ''} ${displayMode ? 'display-mode' : ''}`}
+      className={`wall-card ${isLive ? 'is-live' : ''} ${displayMode ? 'display-mode' : ''} ${
+        post.file_type === 'video' && externalVideoLayer ? 'external-video' : ''}`}
       style={{
         width,
         position: 'absolute',
@@ -842,6 +843,10 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
         .wall-card:hover  { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); }
         .wall-card.display-mode { cursor: pointer; }
         .wall-card.is-live:not(.display-mode) { outline: 2px solid #4a9eff; outline-offset: 2px; }
+        /* The clip is drawn by a layer behind the wall, so this card is a hole
+           punched through to it. Anything overlapping it still paints on top,
+           which a layer above the wall could not allow. */
+        .wall-card.external-video { background: transparent; }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
         .card-media img, .card-media video, .card-media canvas {
           width: 100%; height: 100%; object-fit: cover; display: block;

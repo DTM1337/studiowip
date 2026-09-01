@@ -16,11 +16,6 @@ export default function DisplayPage() {
   const [externalSelectedPostId, setExternalSelectedPostId] = useState<string | null>(null)
   const [rotation, setRotation] = useState(0)
   const [showRulers, setShowRulers] = useState(false)
-  // Tizen keeps decoded frames where drawImage cannot reach them, so canvas
-  // rendering is dead for video and the ▣ button now switches the fullscreen
-  // overlay between rotating the element and leaving it untransformed — the
-  // one remaining question about how the panel treats a <video>.
-  const [plainVideo, setPlainVideo] = useState(false)
   const [debug, setDebug] = useState<string[]>([])
   // Toggled from GodMode so nothing has to be typed on a TV remote; the query
   // param stays as a way to have it on from the first paint.
@@ -30,7 +25,16 @@ export default function DisplayPage() {
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('debug')) setShowDebug(true)
+    // The panel is mounted at a fixed angle, so losing the rotation on every
+    // reload meant the TV came back landscape — and with it every video
+    // behaviour that only applies while rotated.
+    const saved = Number(localStorage.getItem('display-rotation'))
+    if ([90, 180, 270].includes(saved)) setRotation(saved)
   }, [])
+
+  useEffect(() => {
+    localStorage.setItem('display-rotation', String(rotation))
+  }, [rotation])
 
   // Read inside CanvasVideo's paint loop to draw its test marker, avoiding
   // threading a debug-only prop through CreativeWall.
@@ -53,7 +57,7 @@ export default function DisplayPage() {
       const subs = supabase.getChannels().filter(ch => ch.topic.endsWith(CHANNEL)).length
       const fs = document.documentElement.dataset.fsVideo
       setDebug([
-        `rot=${rotation} plainMode=${plainVideo} cursor=${hideCursor ? 'hidden' : 'visible'} video=${vids}`,
+        `rot=${rotation} cursor=${hideCursor ? 'hidden' : 'visible'} video=${vids}`,
         ...(fs ? [`FS ${fs}`] : []),
         `cmds=${c.total} rotates=${c.rotates} last=${c.last} ${ago} ago subs=${subs}`,
         ...c.recent.map(r => `  ${r}`),
@@ -63,7 +67,7 @@ export default function DisplayPage() {
     tick()
     const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
-  }, [rotation, plainVideo, showDebug, hideCursor])
+  }, [rotation, showDebug, hideCursor])
 
   useEffect(() => {
     fetch('/api/posts')
@@ -103,8 +107,6 @@ export default function DisplayPage() {
         setRotation(r => (r + 90) % 360)
       } else if (cmd.action === 'toggle-rulers') {
         setShowRulers(r => !r)
-      } else if (cmd.action === 'toggle-canvas-video') {
-        setPlainVideo(v => !v)
       } else if (cmd.action === 'toggle-debug') {
         setShowDebug(d => !d)
       } else if (cmd.action === 'toggle-cursor') {
@@ -139,6 +141,9 @@ export default function DisplayPage() {
       stage.style.top = '0'
       stage.style.left = '0'
       stage.style.overflow = 'hidden'
+      // Above the video layer, which sits at 0 and shows through the holes
+      // punched by transparent video cards.
+      stage.style.zIndex = '1'
 
       if (rotation === 0) {
         stage.style.width = `${vw}px`
@@ -175,9 +180,15 @@ export default function DisplayPage() {
       // CSS vw/vh units always resolve against the real viewport, never the
       // wrapper — so every 100vw/100vh rule has to be overridden with the
       // rotated dimensions or the layout overflows and clips.
+      // The wall's own background has to move to the body, otherwise it would
+      // paint over the video layer sitting behind the stage.
       styleEl.textContent = `
         .wall-root { width: ${W}px !important; height: ${H}px !important; min-height: ${H}px !important; }
         .wall-stage { width: ${W}px !important; height: ${H}px !important; }
+        ${rotation === 90 ? `
+          body { background: #efefef; }
+          .wall-root { background: transparent !important; }
+        ` : ''}
       `
     }
 
@@ -269,8 +280,7 @@ export default function DisplayPage() {
       </div>
       {useWallVideoLayer && <WallVideoLayer posts={videoPosts} />}
       {useVideoOverlay && fullscreenPost && (
-        <RotatedVideoOverlay src={fullscreenPost.file_url} rotation={rotation}
-          forceOriginal={plainVideo} />
+        <RotatedVideoOverlay src={fullscreenPost.file_url} rotation={rotation} />
       )}
     </>
   )

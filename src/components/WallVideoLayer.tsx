@@ -17,8 +17,9 @@ type Props = {
  * card's on-screen rectangle instead, and plays the pre-rotated file with no
  * transform of its own, so nothing depends on how the browser composites video.
  *
- * Trade-off: this layer sits above the wall, so a video card cannot be
- * overlapped by a card in front of it while the display is rotated.
+ * The layer sits *behind* the wall, and video cards are made transparent so it
+ * shows through. That keeps the stacking order intact: a card in front of a
+ * video card still covers it, which would be impossible with the clips on top.
  */
 export default function WallVideoLayer({ posts }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -84,7 +85,7 @@ export default function WallVideoLayer({ posts }: Props) {
   return (
     <div
       ref={containerRef}
-      style={{ position: 'fixed', inset: 0, zIndex: 400, pointerEvents: 'none' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}
     >
       {posts.map(post => (
         <div
@@ -104,6 +105,16 @@ export default function WallVideoLayer({ posts }: Props) {
             playsInline
             autoPlay
             preload="auto"
+            // Clips uploaded before pre-rotation, or missed by the backfill,
+            // have no variant. Without this the card would just be an empty
+            // hole with nothing to explain it.
+            onError={e => {
+              const el = e.currentTarget
+              if (el.dataset.fellBack) return
+              el.dataset.fellBack = '1'
+              el.src = post.file_url
+              el.play().catch(() => {})
+            }}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
         </div>

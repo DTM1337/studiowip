@@ -45,7 +45,6 @@ export default function GodMode() {
 
   const handleRotate = () => send({ action: 'rotate' })
   const handleToggleRulers = () => send({ action: 'toggle-rulers' })
-  const handleToggleCanvasVideo = () => send({ action: 'toggle-canvas-video' })
   const handleToggleDebug = () => send({ action: 'toggle-debug' })
   const handleToggleCursor = () => send({ action: 'toggle-cursor' })
 
@@ -134,11 +133,6 @@ export default function GodMode() {
           style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
                    padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
           ⓘ
-        </button>
-        <button onClick={handleToggleCanvasVideo} title="Växla canvas-rendering av film (för roterad TV)"
-          style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
-                   padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
-          ▣
         </button>
         <button onClick={handleRotate} title="Rotera display 90°"
           style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,

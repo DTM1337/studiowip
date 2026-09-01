@@ -7,8 +7,6 @@ type Props = {
   src: string
   /** Degrees the display is rotated by. */
   rotation: number
-  /** Skip the pre-rotated file and fall back to CSS, for comparing the two. */
-  forceOriginal: boolean
 }
 
 /**
@@ -25,13 +23,13 @@ type Props = {
  * back to the original plus a CSS rotation — correct in a desktop browser,
  * wrong on the TV, but better than not playing.
  */
-export default function RotatedVideoOverlay({ src, rotation, forceOriginal }: Props) {
+export default function RotatedVideoOverlay({ src, rotation }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
 
   // Only a quarter turn clockwise has a baked variant; anything else has to
   // fall back to transforming the element.
-  const canUseVariant = rotation === 90 && !forceOriginal
+  const canUseVariant = rotation === 90
   const [useVariant, setUseVariant] = useState(canUseVariant)
 
   useEffect(() => { setUseVariant(canUseVariant) }, [canUseVariant, src])

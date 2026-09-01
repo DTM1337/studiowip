@@ -77,34 +77,54 @@ export default function RotatedVideoOverlay({ src, rotation }: Props) {
     const onError = () => { if (useVariant) setUseVariant(false) }
     video.addEventListener('error', onError)
 
-    const kick = () => { video.play().catch(() => {}) }
-    video.addEventListener('loadedmetadata', kick)
-    video.addEventListener('loadeddata', kick)
-    video.addEventListener('canplay', kick)
-    video.addEventListener('pause', kick)
-    kick()
+    // Waiting for a buffer rather than starting at the first playable frame.
+    // `canplay` fires with barely two frames ready, so playback began and then
+    // stuttered for the first second or two while it caught up. HAVE_ENOUGH_DATA
+    // means the browser thinks it can reach the end without stalling.
+    let started = false
+    const start = () => {
+      if (started || stopped) return
+      started = true
+      video.play().catch(() => {})
+    }
+    const startWhenBuffered = () => { if (video.readyState >= 4) start() }
+
+    video.addEventListener('canplaythrough', start)
+    video.addEventListener('progress', startWhenBuffered)
+    video.addEventListener('loadeddata', startWhenBuffered)
+    // A slow connection may never reach HAVE_ENOUGH_DATA, and a clip that never
+    // plays is worse than one that stutters.
+    const impatient = window.setTimeout(start, 4000)
+
+    // Once running, a pause is something to recover from rather than wait out.
+    const resume = () => { if (started) video.play().catch(() => {}) }
+    video.addEventListener('pause', resume)
+
+    startWhenBuffered()
 
     const watchdog = window.setInterval(() => {
       if (stopped) return
-      if (video.paused) video.play().catch(() => {})
+      if (started && video.paused) video.play().catch(() => {})
       const r = box.getBoundingClientRect()
       document.documentElement.dataset.fsVideo =
         `src=${useVariant ? 'rot90' : 'original'} ready=${video.readyState}` +
         ` paused=${video.paused} t=${video.currentTime.toFixed(1)}` +
         ` nat=${video.videoWidth}x${video.videoHeight}` +
         ` box=${Math.round(r.width)}x${Math.round(r.height)}` +
+        ` buffered=${video.buffered.length ? video.buffered.end(video.buffered.length - 1).toFixed(1) : 0}` +
         ` err=${video.error ? video.error.code : '-'}`
     }, 1000)
 
     return () => {
       stopped = true
       window.clearInterval(watchdog)
+      window.clearTimeout(impatient)
       window.removeEventListener('resize', layout)
       video.removeEventListener('error', onError)
-      video.removeEventListener('loadedmetadata', kick)
-      video.removeEventListener('loadeddata', kick)
-      video.removeEventListener('canplay', kick)
-      video.removeEventListener('pause', kick)
+      video.removeEventListener('canplaythrough', start)
+      video.removeEventListener('progress', startWhenBuffered)
+      video.removeEventListener('loadeddata', startWhenBuffered)
+      video.removeEventListener('pause', resume)
       delete document.documentElement.dataset.fsVideo
     }
   }, [playbackSrc, rotation, useVariant])
@@ -119,7 +139,6 @@ export default function RotatedVideoOverlay({ src, rotation }: Props) {
           muted
           loop
           playsInline
-          autoPlay
           preload="auto"
           style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
         />

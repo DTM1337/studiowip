@@ -85,14 +85,18 @@ export default function CreativeWall({
   }, [selectedPost, focusedPost])
 
   /**
-   * Natural width/height per post.
+   * Natural width/height per post, needed before a card is placed: the column
+   * packing has to know how tall each one will be, and a card whose media has
+   * not loaded yet would otherwise collapse.
    *
-   * Needed twice over: a lazily loaded <video> has no intrinsic size until it
-   * loads and a card drawn by the external layer has no media element at all,
-   * so their boxes would collapse; and the column packing has to know how tall
-   * each card will be before placing it.
+   * Measured from the still frame for videos, never the clip. Reading it from
+   * the video meant every clip on the board fetched its own header on each
+   * page load — ten requests here — competing for bandwidth with whatever was
+   * playing fullscreen. The poster has the same shape and is downloaded for
+   * the card anyway.
    */
   const [aspects, setAspects] = useState<Record<string, number>>({})
+  const probed = useRef(new Set<string>())
   useEffect(() => {
     let cancelled = false
     const record = (id: string, w: number, h: number) => {
@@ -100,17 +104,21 @@ export default function CreativeWall({
       setAspects(prev => prev[id] ? prev : { ...prev, [id]: w / h })
     }
     for (const post of posts) {
-      if (aspects[post.id]) continue
-      if (post.file_type === 'image') {
-        const img = new Image()
-        img.onload = () => record(post.id, img.naturalWidth, img.naturalHeight)
-        img.src = post.file_url
-      } else {
+      if (probed.current.has(post.id)) continue
+      probed.current.add(post.id)
+
+      const img = new Image()
+      img.onload = () => record(post.id, img.naturalWidth, img.naturalHeight)
+      img.onerror = () => {
+        if (post.file_type !== 'video') return
+        // No poster: an older clip the backfill has not reached. Falling back
+        // to the clip's own header is the expensive path, hence only here.
         const probe = document.createElement('video')
         probe.preload = 'metadata'
         probe.onloadedmetadata = () => record(post.id, probe.videoWidth, probe.videoHeight)
         probe.src = post.file_url
       }
+      img.src = post.file_type === 'video' ? posterVariantUrl(post.file_url) : post.file_url
     }
     return () => { cancelled = true }
   }, [posts])

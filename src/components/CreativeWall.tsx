@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Post } from '@/types'
 import CanvasVideo from './CanvasVideo'
+import LazyVideo from './LazyVideo'
 
 function seededRand(seed: string) {
   let h = 0
@@ -56,6 +57,12 @@ function findEmptySpot(posts: Post[]): { x: number; y: number } {
 
 const MIN_ZOOM = 0.2
 const MAX_ZOOM = 3
+
+// Files go straight to storage, so this is a deliberate choice rather than a
+// platform ceiling: a wall of long clips is heavy for the TV to play whatever
+// the transport allows.
+const MAX_UPLOAD_MB = 20
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
 interface Props {
   initialPosts: Post[]
@@ -208,7 +215,9 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
       if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
         alert(`Filtyp stöds ej: ${file.type}`); continue
       }
-      if (file.size > 500 * 1024 * 1024) { alert('Max 500MB per fil'); continue }
+      if (file.size > MAX_UPLOAD_BYTES) {
+        alert(`Max ${MAX_UPLOAD_MB} MB per fil`); continue
+      }
 
       let fileToUpload = file
       let rotatedFile: File | null = null
@@ -231,15 +240,32 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         }
       }
 
-      const form = new FormData()
-      form.append('file', fileToUpload)
-      if (rotatedFile) form.append('fileRot90', rotatedFile)
-      const mediaRes = await fetch('/api/upload-media', { method: 'POST', body: form })
-      if (!mediaRes.ok) {
-        const { error } = await mediaRes.json().catch(() => ({ error: 'Upload failed' }))
+      // Straight to storage: routing the bytes through a serverless function
+      // would cap them at 4.5 MB, and the rotated copy shared that budget.
+      const ext = isVideo ? 'mp4' : (file.name.split('.').pop() || 'jpg')
+      const urlRes = await fetch('/api/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ext, rotated: !!rotatedFile }),
+      })
+      if (!urlRes.ok) {
+        const { error } = await urlRes.json().catch(() => ({ error: 'Kunde inte starta uppladdning' }))
         alert(`Upload error: ${error}`); continue
       }
-      const { url: publicUrl, fileType } = await mediaRes.json()
+      const { upload, url: publicUrl, rotatedUpload } = await urlRes.json()
+
+      const put = await supabase.storage.from('media')
+        .uploadToSignedUrl(upload.path, upload.token, fileToUpload)
+      if (put.error) { alert(`Upload error: ${put.error.message}`); continue }
+
+      if (rotatedFile && rotatedUpload) {
+        const putRot = await supabase.storage.from('media')
+          .uploadToSignedUrl(rotatedUpload.path, rotatedUpload.token, rotatedFile)
+        // Only costs correct rotation on the display, so it must not fail the post.
+        if (putRot.error) console.warn('Rotated upload failed:', putRot.error.message)
+      }
+
+      const fileType = isVideo ? 'video' : 'image'
 
       const res = await fetch('/api/upload', {
         method: 'POST',
@@ -813,7 +839,7 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
             ? null
             : canvasVideo
               ? <CanvasVideo src={post.file_url} />
-              : <video src={post.file_url} muted loop playsInline autoPlay />
+              : <LazyVideo src={post.file_url} />
         }
         {!displayMode && (
           <div className="card-hover-overlay">

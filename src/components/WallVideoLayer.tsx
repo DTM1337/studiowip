@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { Post } from '@/types'
+import LazyVideo from './LazyVideo'
 import { rotatedVariantUrl } from '@/lib/rotatedVariant'
 
 type Props = {
@@ -61,24 +62,10 @@ export default function WallVideoLayer({ posts }: Props) {
     const ticker = window.setInterval(position, 100)
     position()
 
-    const video = () => Array.from(
-      containerRef.current?.querySelectorAll('video') ?? [],
-    ) as HTMLVideoElement[]
-
-    // Same watchdog as elsewhere: a TV can park a clip even after play()
-    // resolved, and there is no event for that.
-    const watchdog = window.setInterval(() => {
-      if (stopped) return
-      for (const v of video()) if (v.paused) v.play().catch(() => {})
-    }, 1500)
-
-    for (const v of video()) v.play().catch(() => {})
-
     return () => {
       stopped = true
       cancelAnimationFrame(raf)
       window.clearInterval(ticker)
-      window.clearInterval(watchdog)
     }
   }, [posts])
 
@@ -98,23 +85,12 @@ export default function WallVideoLayer({ posts }: Props) {
             borderRadius: 22,
           }}
         >
-          <video
+          <LazyVideo
             src={rotatedVariantUrl(post.file_url)}
-            muted
-            loop
-            playsInline
-            autoPlay
-            preload="auto"
             // Clips uploaded before pre-rotation, or missed by the backfill,
-            // have no variant. Without this the card would just be an empty
+            // have no variant; without this the card would just be an empty
             // hole with nothing to explain it.
-            onError={e => {
-              const el = e.currentTarget
-              if (el.dataset.fellBack) return
-              el.dataset.fellBack = '1'
-              el.src = post.file_url
-              el.play().catch(() => {})
-            }}
+            fallbackSrc={post.file_url}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
         </div>

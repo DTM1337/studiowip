@@ -77,11 +77,18 @@ export default function GodMode() {
           r => setBackfill(`${i + 1}/${videos.length} — ${Math.round(r * 100)}%`),
         )
 
-        const form = new FormData()
-        form.append('file', rotated)
-        form.append('originalUrl', post.file_url)
-        const res = await fetch('/api/upload-rotated', { method: 'POST', body: form })
-        if (!res.ok) throw new Error(`uppladdning ${res.status}`)
+        // Signed URL rather than posting the file through a function, which
+        // would cap the rotated copy at 4.5 MB.
+        const urlRes = await fetch('/api/upload-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ forUrl: post.file_url }),
+        })
+        if (!urlRes.ok) throw new Error(`signering ${urlRes.status}`)
+        const { upload } = await urlRes.json()
+        const put = await supabase.storage.from('media')
+          .uploadToSignedUrl(upload.path, upload.token, rotated)
+        if (put.error) throw new Error(`uppladdning ${put.error.message}`)
         done++
       } catch (e) {
         failed++

@@ -706,16 +706,12 @@ function BoardCard({ post, displayMode, canvasVideo, aspect, onClick }: CardProp
               />
         }
         {isVideo && <span className="play-badge" aria-hidden="true">▶</span>}
-        {!displayMode && (
-          <div className="card-hover-overlay">
-            <span className="card-user">{post.uploader_name}</span>
-            {post.caption && <span className="card-caption">{post.caption}</span>}
-          </div>
-        )}
-        {displayMode && (
-          <div className="display-label">
-            <span className="card-user">{post.uploader_name}</span>
-            {post.caption && <span className="card-caption">{post.caption}</span>}
+        {/* Only the caption: the uploader's name is not shown on the board.
+            Rendered at all only when there is a caption, so a card without one
+            does not carry an empty gradient strip. */}
+        {post.caption && (
+          <div className={displayMode ? 'display-label' : 'card-hover-overlay'}>
+            <span className="card-caption">{post.caption}</span>
           </div>
         )}
       </div>
@@ -752,8 +748,7 @@ function BoardCard({ post, displayMode, canvasVideo, aspect, onClick }: CardProp
           display: flex; flex-direction: column; justify-content: flex-end;
           padding: 14px; border-radius: 0 0 22px 22px;
         }
-        .card-user    { font-size: 12px; font-weight: 700; color: #fff; }
-        .card-caption { font-size: 11px; color: rgba(255,255,255,.75); margin-top: 2px; }
+        .card-caption { font-size: 11px; color: rgba(255,255,255,.85); }
         /* The board shows a still, so a clip needs saying so. */
         .play-badge {
           position: absolute; top: 10px; right: 10px;

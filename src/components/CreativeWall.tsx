@@ -77,13 +77,19 @@ interface Props {
   externalVideoLayer?: boolean
   /** Width/height per video post, used to size the empty card boxes. */
   videoAspects?: Record<string, number>
+  /**
+   * Reports the live post list. This component keeps the canonical one — it
+   * subscribes to inserts — so anything outside that needs to look a post up
+   * has to follow it, or it will miss everything uploaded since page load.
+   */
+  onPostsChange?: (posts: Post[]) => void
 }
 
 type LivePositions = Record<string, { x: number; y: number }>
 type LiveSizes = Record<string, number>
 
 export default function CreativeWall({ initialPosts, uploaderName, displayMode = false, onViewChange, externalView, onSelectPost, externalSelectedPostId, canvasVideo = false, suppressFullscreenVideo = false,
-  externalVideoLayer = false, videoAspects }: Props) {
+  externalVideoLayer = false, videoAspects, onPostsChange }: Props) {
   const [posts, setPosts]                 = useState<Post[]>(initialPosts)
   const [selectedPost, setSelectedPost]   = useState<Post | null>(null)
   const [focusedPost, setFocusedPost]     = useState<Post | null>(null)
@@ -106,6 +112,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
   const stageRef        = useRef<HTMLDivElement>(null)
 
   useEffect(() => { onViewChange?.(pan, zoom) }, [pan, zoom])
+  useEffect(() => { onPostsChange?.(posts) }, [posts])
   useEffect(() => {
     const id = selectedPost?.id ?? focusedPost?.id ?? null
     onSelectPost?.(id)

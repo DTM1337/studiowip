@@ -11,6 +11,9 @@ import { CHANNEL } from '@/lib/displayChannel'
 
 export default function DisplayPage() {
   const [posts, setPosts] = useState<Post[]>([])
+  // CreativeWall owns the live list; this mirrors it so lookups here do not
+  // miss anything uploaded after the page loaded.
+  const [livePosts, setLivePosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [externalView, setExternalView] = useState<{ pan: { x: number; y: number }; zoom: number } | null>(null)
   const [externalSelectedPostId, setExternalSelectedPostId] = useState<string | null>(null)
@@ -205,7 +208,8 @@ export default function DisplayPage() {
   // Only a quarter turn clockwise has pre-rotated files, so only then can card
   // videos move to the unrotated layer; otherwise they stay in the wall.
   const useWallVideoLayer = rotation === 90
-  const videoPosts = useMemo(() => posts.filter(p => p.file_type === 'video'), [posts])
+  const allPosts = livePosts.length ? livePosts : posts
+  const videoPosts = useMemo(() => allPosts.filter(p => p.file_type === 'video'), [allPosts])
 
   // The card boxes are empty while the layer draws their clips, so they have no
   // media to take a height from and each ratio has to be measured up front.
@@ -228,7 +232,7 @@ export default function DisplayPage() {
   }, [useWallVideoLayer, videoPosts])
 
   const fullscreenPost = externalSelectedPostId
-    ? posts.find(p => p.id === externalSelectedPostId) ?? null
+    ? allPosts.find(p => p.id === externalSelectedPostId) ?? null
     : null
   // Only a rotated display needs the overlay; unrotated, the wall's own
   // fullscreen view is already correct and cheaper.
@@ -276,7 +280,8 @@ export default function DisplayPage() {
           externalView={externalView} externalSelectedPostId={externalSelectedPostId}
           suppressFullscreenVideo={useVideoOverlay}
           externalVideoLayer={useWallVideoLayer}
-          videoAspects={videoAspects} />
+          videoAspects={videoAspects}
+          onPostsChange={setLivePosts} />
       </div>
       {useWallVideoLayer && <WallVideoLayer posts={videoPosts} />}
       {useVideoOverlay && fullscreenPost && (

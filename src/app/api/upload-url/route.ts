@@ -13,8 +13,8 @@ import { randomUUID } from 'crypto'
  * expires, so no public write access has to be opened.
  */
 export async function POST(req: NextRequest) {
-  const { ext, rotated, forUrl } = await req.json() as
-    { ext?: string; rotated?: boolean; forUrl?: string }
+  const { ext, rotated, poster, forUrl, variant } = await req.json() as
+    { ext?: string; rotated?: boolean; poster?: boolean; forUrl?: string; variant?: string }
 
   // Backfill mode: a rotated copy for a clip that already exists, named after
   // the original rather than a fresh id.
@@ -28,11 +28,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unexpected object name' }, { status: 400 })
     }
     const dot = objectName.lastIndexOf('.')
-    const rotName = `${dot === -1 ? objectName : objectName.slice(0, dot)}-rot90.mp4`
+    const stem = dot === -1 ? objectName : objectName.slice(0, dot)
+    const suffix = variant === 'poster' ? '-poster.jpg' : '-rot90.mp4'
 
     // upsert so a variant can be regenerated over a bad one.
     const r = await supabaseAdmin.storage.from('media')
-      .createSignedUploadUrl(rotName, { upsert: true })
+      .createSignedUploadUrl(`${stem}${suffix}`, { upsert: true })
     if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 })
 
     return NextResponse.json({ upload: { path: r.data.path, token: r.data.token, signedUrl: r.data.signedUrl } })
@@ -59,10 +60,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  let posterUpload: { path: string; token: string; signedUrl: string } | null = null
+  if (poster) {
+    const p = await supabaseAdmin.storage.from('media').createSignedUploadUrl(`${id}-poster.jpg`)
+    // Not fatal: without it the board falls back to playing the clip.
+    if (!p.error) posterUpload = { path: p.data.path, token: p.data.token, signedUrl: p.data.signedUrl }
+  }
+
   return NextResponse.json({
     upload: { path: main.data.path, token: main.data.token, signedUrl: main.data.signedUrl },
     url: publicUrl,
     rotatedUpload,
     rotatedUrl,
+    posterUpload,
   })
 }

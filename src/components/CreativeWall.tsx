@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { Post } from '@/types'
 import CanvasVideo from './CanvasVideo'
 import LazyVideo from './LazyVideo'
+import { posterVariantUrl } from '@/lib/rotatedVariant'
 
 // Files go straight to storage, so this is a deliberate choice rather than a
 // platform ceiling: a wall of long clips is heavy for the TV to play whatever
@@ -51,12 +52,6 @@ interface Props {
   /** Skip the fullscreen view for videos; something outside is drawing it. */
   suppressFullscreenVideo?: boolean
   /**
-   * Leave card videos empty so an unrotated layer outside the rotated wrapper
-   * can draw them. Needed because Tizen ignores an ancestor transform on a
-   * <video> and would place the clip at its pre-rotation position.
-   */
-  externalVideoLayer?: boolean
-  /**
    * Reports the live post list. This component keeps the canonical one — it
    * subscribes to inserts — so anything outside that needs to look a post up
    * has to follow it, or it will miss everything uploaded since page load.
@@ -67,8 +62,7 @@ interface Props {
 export default function CreativeWall({
   initialPosts, uploaderName, displayMode = false,
   onScrollChange, externalScroll, onSelectPost, externalSelectedPostId,
-  canvasVideo = false, suppressFullscreenVideo = false,
-  externalVideoLayer = false, onPostsChange,
+  canvasVideo = false, suppressFullscreenVideo = false, onPostsChange,
 }: Props) {
   const [posts, setPosts]               = useState<Post[]>(initialPosts)
   const [selectedPost, setSelectedPost] = useState<Post | null>(null)
@@ -270,6 +264,7 @@ export default function CreativeWall({
 
       let fileToUpload = file
       let rotatedFile: File | null = null
+      let posterFile: File | null = null
       const isVideo = file.type.startsWith('video/')
 
       if (isVideo) {
@@ -277,6 +272,13 @@ export default function CreativeWall({
           step('Förbereder film', 0, 0)
           const { transcodeToH264, rotateVideo90 } = await import('@/lib/transcodeVideo')
           fileToUpload = await transcodeToH264(file, r => step('Konverterar film', 2, 50, r))
+          // The board shows this instead of playing the clip.
+          try {
+            const { extractPoster } = await import('@/lib/videoPoster')
+            posterFile = await extractPoster(fileToUpload)
+          } catch (e) {
+            console.warn('Poster failed, board will play the clip instead:', e)
+          }
           // A rotated display cannot rotate video at playback time on a TV, so
           // a pre-rotated copy is made here. Failing to build it only costs
           // correct rotation on the display, so it must not fail the upload.
@@ -296,13 +298,13 @@ export default function CreativeWall({
       const urlRes = await fetch('/api/upload-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ext, rotated: !!rotatedFile }),
+        body: JSON.stringify({ ext, rotated: !!rotatedFile, poster: !!posterFile }),
       })
       if (!urlRes.ok) {
         const { error } = await urlRes.json().catch(() => ({ error: 'Kunde inte starta uppladdning' }))
         alert(`Upload error: ${error}`); continue
       }
-      const { upload, url: publicUrl, rotatedUpload } = await urlRes.json()
+      const { upload, url: publicUrl, rotatedUpload, posterUpload } = await urlRes.json()
 
       const from = isVideo ? 85 : 0
       try {
@@ -317,6 +319,14 @@ export default function CreativeWall({
         } catch (e) {
           // Only costs correct rotation on the display, so it must not fail the post.
           console.warn('Rotated upload failed:', e)
+        }
+      }
+
+      if (posterFile && posterUpload) {
+        try {
+          await putSigned(posterUpload.signedUrl, posterFile, () => {})
+        } catch (e) {
+          console.warn('Poster upload failed:', e)
         }
       }
 
@@ -460,8 +470,7 @@ export default function CreativeWall({
                 post={post}
                 displayMode={displayMode}
                 canvasVideo={canvasVideo}
-                externalVideoLayer={externalVideoLayer}
-                aspect={aspects[post.id]}
+                    aspect={aspects[post.id]}
                 onClick={() => handleCardClick(post)}
               />
             ))}
@@ -651,25 +660,21 @@ interface CardProps {
   post: Post
   displayMode: boolean
   canvasVideo: boolean
-  externalVideoLayer: boolean
   aspect?: number
   onClick: () => void
 }
 
-function BoardCard({ post, displayMode, canvasVideo, externalVideoLayer, aspect, onClick }: CardProps) {
+function BoardCard({ post, displayMode, canvasVideo, aspect, onClick }: CardProps) {
   const isVideo = post.file_type === 'video'
+  const [posterFailed, setPosterFailed] = useState(false)
 
   return (
     <article
-      className={`wall-card ${displayMode ? 'display-mode' : ''} ${
-        isVideo && externalVideoLayer ? 'external-video' : ''}`}
+      className={`wall-card ${displayMode ? 'display-mode' : ''}`}
       onClick={onClick}
     >
       <div
         className="card-media"
-        // Measured from outside to place this card's video in the unrotated
-        // layer; see externalVideoLayer.
-        data-video-card={isVideo && externalVideoLayer ? post.id : undefined}
         // Reserving the box from the measured ratio keeps the packing honest:
         // if a card grew after placement the column heights would no longer
         // match what they were packed against. The fallbacks apply only until
@@ -679,15 +684,22 @@ function BoardCard({ post, displayMode, canvasVideo, externalVideoLayer, aspect,
         {post.file_type === 'image'
           // eslint-disable-next-line @next/next/no-img-element
           ? <img src={post.file_url} alt={post.caption ?? ''} draggable={false} />
-          : externalVideoLayer
-            // Left empty on purpose: the frame is drawn by the external layer,
-            // but the box still has to occupy its normal space so the card
-            // keeps its size and the layer has something to measure.
-            ? null
-            : canvasVideo
-              ? <CanvasVideo src={post.file_url} />
-              : <LazyVideo src={post.file_url} />
+          : posterFailed
+            // No still frame yet — clips uploaded before posters existed, or
+            // missed by the backfill. Playing it is the old behaviour and looks
+            // right everywhere except a rotated TV.
+            ? (canvasVideo
+                ? <CanvasVideo src={post.file_url} />
+                : <LazyVideo src={post.file_url} />)
+            // eslint-disable-next-line @next/next/no-img-element
+            : <img
+                src={posterVariantUrl(post.file_url)}
+                alt={post.caption ?? ''}
+                draggable={false}
+                onError={() => setPosterFailed(true)}
+              />
         }
+        {isVideo && <span className="play-badge" aria-hidden="true">▶</span>}
         {!displayMode && (
           <div className="card-hover-overlay">
             <span className="card-user">{post.uploader_name}</span>
@@ -712,10 +724,6 @@ function BoardCard({ post, displayMode, canvasVideo, externalVideoLayer, aspect,
         }
         .wall-card:hover { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); }
         .wall-card:not(.display-mode):hover { transform: translateY(-2px); }
-        /* The clip is drawn by a layer behind the wall, so this card is a hole
-           punched through to it. Anything overlapping it still paints on top,
-           which a layer above the wall could not allow. */
-        .wall-card.external-video { background: transparent; }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
         .card-media img, .card-media video, .card-media canvas {
           width: 100%; height: 100%; object-fit: cover; display: block;
@@ -740,6 +748,15 @@ function BoardCard({ post, displayMode, canvasVideo, externalVideoLayer, aspect,
         }
         .card-user    { font-size: 12px; font-weight: 700; color: #fff; }
         .card-caption { font-size: 11px; color: rgba(255,255,255,.75); margin-top: 2px; }
+        /* The board shows a still, so a clip needs saying so. */
+        .play-badge {
+          position: absolute; top: 10px; right: 10px;
+          width: 26px; height: 26px; border-radius: 50%;
+          background: rgba(0,0,0,.55); backdrop-filter: blur(6px);
+          color: #fff; font-size: 10px;
+          display: flex; align-items: center; justify-content: center;
+          padding-left: 2px; pointer-events: none;
+        }
       `}</style>
     </article>
   )

@@ -56,8 +56,23 @@ export default function GodMode() {
     if (!videos.length) { setBackfill('Inga filmer'); return }
     if (!confirm(`Skapa roterade versioner för ${videos.length} filmer? Det tar en stund.`)) return
 
-    const { rotatedVariantUrl } = await import('@/lib/rotatedVariant')
+    const { rotatedVariantUrl, posterVariantUrl } = await import('@/lib/rotatedVariant')
     const { rotateVideo90 } = await import('@/lib/transcodeVideo')
+    const { extractPoster } = await import('@/lib/videoPoster')
+
+    // Uploading a variant for a clip that already exists.
+    const putVariant = async (originalUrl: string, variant: string, file: File) => {
+      const res = await fetch('/api/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forUrl: originalUrl, variant }),
+      })
+      if (!res.ok) throw new Error(`signering ${res.status}`)
+      const { upload } = await res.json()
+      const put = await supabase.storage.from('media')
+        .uploadToSignedUrl(upload.path, upload.token, file)
+      if (put.error) throw new Error(`uppladdning ${put.error.message}`)
+    }
     let done = 0, skipped = 0, failed = 0
     // Kept and shown: a silent catch here once reported three failures with no
     // hint that the cause was a bad ffmpeg URL.
@@ -66,29 +81,29 @@ export default function GodMode() {
     for (const [i, post] of videos.entries()) {
       setBackfill(`${i + 1}/${videos.length}…`)
       try {
-        const existing = await fetch(rotatedVariantUrl(post.file_url), { method: 'HEAD' })
-        if (existing.ok) { skipped++; continue }
+        const [hasRot, hasPoster] = await Promise.all([
+          fetch(rotatedVariantUrl(post.file_url), { method: 'HEAD' }).then(r => r.ok),
+          fetch(posterVariantUrl(post.file_url), { method: 'HEAD' }).then(r => r.ok),
+        ])
+        if (hasRot && hasPoster) { skipped++; continue }
 
         const original = await fetch(post.file_url)
         if (!original.ok) throw new Error(`hämtning ${original.status}`)
-        const blob = await original.blob()
-        const rotated = await rotateVideo90(
-          new File([blob], 'in.mp4', { type: 'video/mp4' }),
-          r => setBackfill(`${i + 1}/${videos.length} — ${Math.round(r * 100)}%`),
-        )
+        const source = new File([await original.blob()], 'in.mp4', { type: 'video/mp4' })
 
-        // Signed URL rather than posting the file through a function, which
-        // would cap the rotated copy at 4.5 MB.
-        const urlRes = await fetch('/api/upload-url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ forUrl: post.file_url }),
-        })
-        if (!urlRes.ok) throw new Error(`signering ${urlRes.status}`)
-        const { upload } = await urlRes.json()
-        const put = await supabase.storage.from('media')
-          .uploadToSignedUrl(upload.path, upload.token, rotated)
-        if (put.error) throw new Error(`uppladdning ${put.error.message}`)
+        // The still frame first: it is quick, and it is what the board shows.
+        if (!hasPoster) {
+          setBackfill(`${i + 1}/${videos.length} — stillbild`)
+          await putVariant(post.file_url, 'poster', await extractPoster(source))
+        }
+
+        if (!hasRot) {
+          const rotated = await rotateVideo90(
+            source,
+            r => setBackfill(`${i + 1}/${videos.length} — roterar ${Math.round(r * 100)}%`),
+          )
+          await putVariant(post.file_url, 'rot90', rotated)
+        }
         done++
       } catch (e) {
         failed++

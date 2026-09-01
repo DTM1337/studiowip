@@ -1,9 +1,8 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import CreativeWall from '@/components/CreativeWall'
 import RotatedVideoOverlay from '@/components/RotatedVideoOverlay'
-import WallVideoLayer from '@/components/WallVideoLayer'
 import Rulers from '@/components/Rulers'
 import { Post } from '@/types'
 import { supabase } from '@/lib/supabase'
@@ -145,9 +144,6 @@ export default function DisplayPage() {
       stage.style.top = '0'
       stage.style.left = '0'
       stage.style.overflow = 'hidden'
-      // Above the video layer, which sits at 0 and shows through the holes
-      // punched by transparent video cards.
-      stage.style.zIndex = '1'
 
       if (rotation === 0) {
         stage.style.width = `${vw}px`
@@ -184,14 +180,8 @@ export default function DisplayPage() {
       // CSS vw/vh units always resolve against the real viewport, never the
       // wrapper — so every 100vw/100vh rule has to be overridden with the
       // rotated dimensions or the layout overflows and clips.
-      // The wall's own background has to move to the body, otherwise it would
-      // paint over the video layer sitting behind the stage.
       styleEl.textContent = `
         .wall-root { width: ${W}px !important; height: ${H}px !important; }
-        ${rotation === 90 ? `
-          body { background: #efefef; }
-          .wall-root { background: transparent !important; }
-        ` : ''}
       `
     }
 
@@ -208,13 +198,7 @@ export default function DisplayPage() {
     // rotation restored from storage was silently dropped.
   }, [rotation, showDebug, loading])
 
-  // Only a quarter turn clockwise has pre-rotated files, so only then can card
-  // videos move to the unrotated layer; otherwise they stay in the wall.
-  const useWallVideoLayer = rotation === 90
   const allPosts = livePosts.length ? livePosts : posts
-  const videoPosts = useMemo(() => allPosts.filter(p => p.file_type === 'video'), [allPosts])
-
-
   const fullscreenPost = externalSelectedPostId
     ? allPosts.find(p => p.id === externalSelectedPostId) ?? null
     : null
@@ -264,10 +248,8 @@ export default function DisplayPage() {
           externalScroll={externalScroll} externalSelectedPostId={externalSelectedPostId}
           onScrollChange={(_f, top) => setScrollTop(top)}
           suppressFullscreenVideo={useVideoOverlay}
-          externalVideoLayer={useWallVideoLayer}
           onPostsChange={setLivePosts} />
       </div>
-      {useWallVideoLayer && <WallVideoLayer posts={videoPosts} />}
       {useVideoOverlay && fullscreenPost && (
         <RotatedVideoOverlay src={fullscreenPost.file_url} rotation={rotation} />
       )}

@@ -6,58 +6,6 @@ import { Post } from '@/types'
 import CanvasVideo from './CanvasVideo'
 import LazyVideo from './LazyVideo'
 
-function seededRand(seed: string) {
-  let h = 0
-  for (let i = 0; i < seed.length; i++) {
-    h = Math.imul(h ^ seed.charCodeAt(i), 2654435761)
-    h ^= h >>> 16
-  }
-  return ((h >>> 0) / 0xffffffff) * 2 - 1
-}
-
-function basePosition(id: string): { x: number; y: number } {
-  const a = seededRand(id + 'x')
-  const b = seededRand(id + 'y')
-  return { x: a * 680, y: b * 480 }
-}
-
-function aspectW(type: string): number {
-  return type === 'video' ? 320 : 230
-}
-
-function debounce<T extends (...args: Parameters<T>) => void>(fn: T, ms: number) {
-  let timer: ReturnType<typeof setTimeout>
-  return (...args: Parameters<T>) => {
-    clearTimeout(timer)
-    timer = setTimeout(() => fn(...args), ms)
-  }
-}
-
-function findEmptySpot(posts: Post[]): { x: number; y: number } {
-  const W = 260
-  const H = 340
-  const PADDING = 30
-  const candidates = [
-    { x: 0, y: 0 }, { x: 320, y: 0 }, { x: -320, y: 0 },
-    { x: 0, y: 380 }, { x: 0, y: -380 },
-    { x: 320, y: 380 }, { x: -320, y: 380 },
-    { x: 320, y: -380 }, { x: -320, y: -380 },
-    { x: 640, y: 0 }, { x: -640, y: 0 },
-  ]
-  for (const c of candidates) {
-    const overlaps = posts.some((p) => {
-      const px = p.pos_x || basePosition(p.id).x
-      const py = p.pos_y || basePosition(p.id).y
-      return Math.abs(px - c.x) < W + PADDING && Math.abs(py - c.y) < H + PADDING
-    })
-    if (!overlaps) return c
-  }
-  return { x: Math.random() * 400 - 200, y: Math.random() * 400 - 200 }
-}
-
-const MIN_ZOOM = 0.2
-const MAX_ZOOM = 3
-
 // Files go straight to storage, so this is a deliberate choice rather than a
 // platform ceiling: a wall of long clips is heavy for the TV to play whatever
 // the transport allows.
@@ -88,8 +36,10 @@ interface Props {
   initialPosts: Post[]
   uploaderName: string
   displayMode?: boolean
-  onViewChange?: (pan: { x: number; y: number }, zoom: number) => void
-  externalView?: { pan: { x: number; y: number }; zoom: number } | null
+  /** Reports scroll as a 0–1 fraction, plus the raw offset for the rulers. */
+  onScrollChange?: (fraction: number, scrollTop: number) => void
+  /** Scroll position to follow, as a 0–1 fraction of the scrollable height. */
+  externalScroll?: number | null
   onSelectPost?: (postId: string | null) => void
   externalSelectedPostId?: string | null
   /** Paint videos through a <canvas> so they survive a CSS-rotated page. */
@@ -102,8 +52,6 @@ interface Props {
    * <video> and would place the clip at its pre-rotation position.
    */
   externalVideoLayer?: boolean
-  /** Width/height per video post, used to size the empty card boxes. */
-  videoAspects?: Record<string, number>
   /**
    * Reports the live post list. This component keeps the canonical one — it
    * subscribes to inserts — so anything outside that needs to look a post up
@@ -112,123 +60,87 @@ interface Props {
   onPostsChange?: (posts: Post[]) => void
 }
 
-type LivePositions = Record<string, { x: number; y: number }>
-type LiveSizes = Record<string, number>
-
-export default function CreativeWall({ initialPosts, uploaderName, displayMode = false, onViewChange, externalView, onSelectPost, externalSelectedPostId, canvasVideo = false, suppressFullscreenVideo = false,
-  externalVideoLayer = false, videoAspects, onPostsChange }: Props) {
-  const [posts, setPosts]                 = useState<Post[]>(initialPosts)
-  const [selectedPost, setSelectedPost]   = useState<Post | null>(null)
-  const [focusedPost, setFocusedPost]     = useState<Post | null>(null)
-  const [isFileDrag, setIsFileDrag]       = useState(false)
-  const [uploading, setUploading]         = useState(false)
+export default function CreativeWall({
+  initialPosts, uploaderName, displayMode = false,
+  onScrollChange, externalScroll, onSelectPost, externalSelectedPostId,
+  canvasVideo = false, suppressFullscreenVideo = false,
+  externalVideoLayer = false, onPostsChange,
+}: Props) {
+  const [posts, setPosts]               = useState<Post[]>(initialPosts)
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null)
+  const [focusedPost, setFocusedPost]   = useState<Post | null>(null)
+  const [isFileDrag, setIsFileDrag]     = useState(false)
+  const [uploading, setUploading]       = useState(false)
+  const [uploadName, setUploadName]     = useState(uploaderName)
+  const [caption, setCaption]           = useState('')
   // What the upload is doing and how far along, so a multi-minute transcode is
   // not represented by a motionless "Laddar upp…".
-  const [progress, setProgress]           = useState<{ label: string; pct: number } | null>(null)
-  const [uploadName, setUploadName]       = useState(uploaderName)
-  const [caption, setCaption]             = useState('')
-  const [livePositions, setLivePositions] = useState<LivePositions>({})
-  const [liveSizes, setLiveSizes]         = useState<LiveSizes>({})
-  const fileInputRef                      = useRef<HTMLInputElement>(null)
-  const dragCounter                       = useRef(0)
-  const broadcastChannel                  = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const [progress, setProgress]         = useState<{ label: string; pct: number } | null>(null)
+  const fileInputRef                    = useRef<HTMLInputElement>(null)
+  const dragCounter                     = useRef(0)
+  const rootRef                         = useRef<HTMLDivElement>(null)
 
-  const [zoom, setZoom] = useState(1)
-  const [pan, setPan]   = useState({ x: 0, y: 0 })
-  const isPanning       = useRef(false)
-  const panMoved        = useRef(false)
-  const panStart        = useRef({ x: 0, y: 0 })
-  const panOrigin       = useRef({ x: 0, y: 0 })
-  const stageRef        = useRef<HTMLDivElement>(null)
-
-  useEffect(() => { onViewChange?.(pan, zoom) }, [pan, zoom])
   useEffect(() => { onPostsChange?.(posts) }, [posts])
   useEffect(() => {
     const id = selectedPost?.id ?? focusedPost?.id ?? null
     onSelectPost?.(id)
   }, [selectedPost, focusedPost])
 
+  /**
+   * Ratios for the video cards.
+   *
+   * A lazily loaded <video> has no intrinsic size until it starts loading, and
+   * a card whose clip is drawn by the external layer has no media element at
+   * all — either way the box would collapse without an explicit ratio.
+   */
+  const [videoAspects, setVideoAspects] = useState<Record<string, number>>({})
   useEffect(() => {
-    if (!externalView) return
-    setPan(externalView.pan)
-    setZoom(externalView.zoom)
-  }, [externalView])
-
-  const [zOrders, setZOrders] = useState<Record<string, number>>({})
-  const zCounter              = useRef(1)
-
-  const bringToFront = (id: string) => {
-    zCounter.current++
-    setZOrders((prev) => ({ ...prev, [id]: zCounter.current }))
-  }
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const savePosition = useCallback(
-    debounce((id: string, pos_x: number, pos_y: number) => {
-      fetch(`/api/posts/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pos_x, pos_y }),
-      })
-    }, 600),
-    []
-  )
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const saveSize = useCallback(
-    debounce((id: string, card_size: number) => {
-      fetch(`/api/posts/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ card_size }),
-      })
-    }, 600),
-    []
-  )
+    let cancelled = false
+    for (const post of posts) {
+      if (post.file_type !== 'video' || videoAspects[post.id]) continue
+      const probe = document.createElement('video')
+      probe.preload = 'metadata'
+      probe.onloadedmetadata = () => {
+        if (cancelled || !probe.videoWidth || !probe.videoHeight) return
+        setVideoAspects(prev => prev[post.id]
+          ? prev
+          : { ...prev, [post.id]: probe.videoWidth / probe.videoHeight })
+      }
+      probe.src = post.file_url
+    }
+    return () => { cancelled = true }
+  }, [posts])
 
   useEffect(() => {
     const channel = supabase.channel('wall-room')
-
     channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, (payload) => {
       const p = payload.new as Post
-      setPosts((prev) => {
-        if (prev.some((x) => x.id === p.id)) return prev
-        const spot    = findEmptySpot(prev)
-        const newPost = { ...p, pos_x: spot.x, pos_y: spot.y }
-        fetch(`/api/posts/${p.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pos_x: spot.x, pos_y: spot.y }),
-        })
-        zCounter.current++
-        setZOrders((z) => ({ ...z, [p.id]: zCounter.current }))
-        return [newPost, ...prev]
-      })
+      // Newest first, which is where the board puts it too.
+      setPosts((prev) => prev.some((x) => x.id === p.id) ? prev : [p, ...prev])
     })
-
-    channel.on('broadcast', { event: 'move' }, ({ payload }) => {
-      const { id, x, y } = payload as { id: string; x: number; y: number }
-      setLivePositions((prev) => ({ ...prev, [id]: { x, y } }))
-    })
-
-    channel.on('broadcast', { event: 'resize' }, ({ payload }) => {
-      const { id, w } = payload as { id: string; w: number }
-      setLiveSizes((prev) => ({ ...prev, [id]: w }))
-    })
-
     channel.subscribe()
-    broadcastChannel.current = channel
-
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  const broadcastMove = useCallback((id: string, x: number, y: number) => {
-    broadcastChannel.current?.send({ type: 'broadcast', event: 'move', payload: { id, x, y } })
-  }, [])
+  const emitScroll = () => {
+    const el = rootRef.current
+    if (!el || !onScrollChange) return
+    const max = el.scrollHeight - el.clientHeight
+    onScrollChange(max > 0 ? el.scrollTop / max : 0, el.scrollTop)
+  }
 
-  const broadcastResize = useCallback((id: string, w: number) => {
-    broadcastChannel.current?.send({ type: 'broadcast', event: 'resize', payload: { id, w } })
-  }, [])
+  // Applied against this board's own scrollable height rather than a pixel
+  // offset, because the display is a different shape from the controlling
+  // screen and its columns are a different length.
+  useEffect(() => {
+    if (externalScroll == null) return
+    const el = rootRef.current
+    if (!el) return
+    const max = el.scrollHeight - el.clientHeight
+    if (max <= 0) return
+    const target = externalScroll * max
+    if (Math.abs(el.scrollTop - target) > 2) el.scrollTop = target
+  }, [externalScroll, posts])
 
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
     const list = Array.from(files)
@@ -301,14 +213,12 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
       }
 
       step('Sparar', 99, 99)
-      const fileType = isVideo ? 'video' : 'image'
-
       const res = await fetch('/api/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           file_url: publicUrl,
-          file_type: fileType,
+          file_type: isVideo ? 'video' : 'image',
           uploader_name: uploadName.trim() || 'Anonymous',
           caption: caption.trim() || null,
         }),
@@ -355,18 +265,6 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
   }, [uploadFiles, displayMode])
 
   useEffect(() => {
-    const el = stageRef.current
-    if (!el) return
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      const delta = e.deltaY * -0.001
-      setZoom((prev) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev + delta * prev)))
-    }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [])
-
-  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { setFocusedPost(null); setSelectedPost(null) }
     }
@@ -374,107 +272,24 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const onStageMouseDown = (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement
-    const isCard = target.closest('.wall-card')
-    if (e.button === 1 || (!isCard && e.button === 0)) {
-      isPanning.current = true
-      panMoved.current  = false
-      panStart.current  = { x: e.clientX, y: e.clientY }
-      panOrigin.current = { ...pan }
-      e.preventDefault()
-    }
-  }
-
-  const onStageMouseMove = (e: React.MouseEvent) => {
-    if (!isPanning.current) return
-    const dx = e.clientX - panStart.current.x
-    const dy = e.clientY - panStart.current.y
-    if (Math.hypot(dx, dy) > 4) panMoved.current = true
-    if (!panMoved.current) return
-    setPan({ x: panOrigin.current.x + dx / zoom, y: panOrigin.current.y + dy / zoom })
-  }
-
-  const onStageMouseUp = () => { isPanning.current = false; panMoved.current = false }
-
   const handleDelete = async (post: Post) => {
     await fetch(`/api/posts/${post.id}`, { method: 'DELETE' })
     setPosts((prev) => prev.filter((p) => p.id !== post.id))
     setSelectedPost(null)
   }
 
-  const handleMoved = (post: Post, dx: number, dy: number) => {
-    const base = basePosition(post.id)
-    const newX = (post.pos_x !== null && post.pos_x !== undefined ? post.pos_x : base.x) + dx
-    const newY = (post.pos_y !== null && post.pos_y !== undefined ? post.pos_y : base.y) + dy
-    setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, pos_x: newX, pos_y: newY } : p))
-    setLivePositions((prev) => { const n = { ...prev }; delete n[post.id]; return n })
-    savePosition(post.id, newX, newY)
-  }
-
-  const handleResized = (post: Post, newW: number) => {
-    setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, card_size: newW } : p))
-    setLiveSizes((prev) => { const n = { ...prev }; delete n[post.id]; return n })
-    saveSize(post.id, newW)
-  }
-
-  const fitAll = () => {
-  if (posts.length === 0) return
-  const PADDING = 80
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-
-  posts.forEach((p) => {
-    const base = basePosition(p.id)
-    const posX = (p.pos_x !== null && p.pos_x !== undefined) ? p.pos_x : base.x
-    const posY = (p.pos_y !== null && p.pos_y !== undefined) ? p.pos_y : base.y
-    const w    = p.card_size || aspectW(p.file_type)
-    const h    = p.file_type === 'video' ? w * 9 / 16 : w * 5 / 4
-
-    // left:50%=700, marginLeft:-w/2, translateX:posX
-    // top:50%=600, marginTop:-100, translateY:posY
-    const left   = 700 - w / 2 + posX
-    const top    = 600 - 100 + posY
-    const right  = left + w
-    const bottom = top + h
-
-    minX = Math.min(minX, left)
-    maxX = Math.max(maxX, right)
-    minY = Math.min(minY, top)
-    maxY = Math.max(maxY, bottom)
-  })
-
-  const contentW = maxX - minX + PADDING * 2
-  const contentH = maxY - minY + PADDING * 2
-  const viewW    = window.innerWidth
-  const viewH    = window.innerHeight - 53
-
-  const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(viewW / contentW, viewH / contentH)))
-  const centerX = (minX + maxX) / 2
-  const centerY = (minY + maxY) / 2
-
-  setZoom(newZoom)
-  setPan({ x: -(centerX - 700), y: -(centerY - 600) })
-}
-
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen()
-    } else {
-      document.exitFullscreen()
-    }
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen()
+    else document.exitFullscreen()
   }
 
   const handleCardClick = (post: Post) => {
-    if (displayMode) {
-      setFocusedPost((prev) => prev?.id === post.id ? null : post)
-    } else {
-      bringToFront(post.id)
-      setSelectedPost(post)
-    }
+    if (displayMode) setFocusedPost((prev) => prev?.id === post.id ? null : post)
+    else setSelectedPost(post)
   }
 
   return (
-    <div className="wall-root">
+    <div className="wall-root" ref={rootRef} onScroll={emitScroll}>
 
       {!displayMode && (
         <header className="topbar">
@@ -490,7 +305,7 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
                 </div>
               </div>
             ) : (
-              <span className="zoom-hint">Scroll för att zooma · Dra bakgrunden för att panorera</span>
+              <span className="zoom-hint">Nyast först · scrolla för att bläddra</span>
             )}
           </div>
           <div className="topbar-right">
@@ -523,61 +338,23 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
               style={{ display: 'none' }}
               onChange={(e) => { if (e.target.files) uploadFiles(e.target.files); e.target.value = '' }}
             />
-            <div className="zoom-controls">
-              <button onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.2))}>＋</button>
-              <span>{Math.round(zoom * 100)}%</span>
-              <button onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.2))}>－</button>
-              <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>↺</button>
-            </div>
-            <button className="upload-btn" onClick={fitAll} title="Visa alla">⊡</button>
             <button className="upload-btn" onClick={toggleFullscreen}>⛶</button>
           </div>
         </header>
       )}
 
-      <div
-        ref={stageRef}
-        className="wall-stage"
-        style={{ marginTop: displayMode ? 0 : 53 }}
-        onMouseDown={onStageMouseDown}
-        onMouseMove={onStageMouseMove}
-        onMouseUp={onStageMouseUp}
-        onMouseLeave={onStageMouseUp}
-      >
-        <div
-          className="wall-canvas"
-          style={{ transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`, transformOrigin: 'center center' }}
-        >
-          {posts.map((post) => {
-            const base  = basePosition(post.id)
-            const live  = livePositions[post.id]
-            const initX = live?.x ?? (post.pos_x !== null && post.pos_x !== undefined ? post.pos_x : base.x)
-            const initY = live?.y ?? (post.pos_y !== null && post.pos_y !== undefined ? post.pos_y : base.y)
-            const w     = liveSizes[post.id] ?? post.card_size ?? aspectW(post.file_type)
-            const z     = zOrders[post.id] ?? 1
-
-            return (
-              <DraggableCard
-                key={post.id}
-                post={post}
-                initX={initX}
-                initY={initY}
-                width={w}
-                zIndex={z}
-                isLive={!!live}
-                displayMode={displayMode}
-                canvasVideo={canvasVideo}
-                externalVideoLayer={externalVideoLayer}
-                videoAspect={videoAspects?.[post.id]}
-                onDragging={(x, y) => broadcastMove(post.id, x, y)}
-                onResizing={(w) => broadcastResize(post.id, w)}
-                onMoved={(dx, dy) => { bringToFront(post.id); handleMoved(post, dx, dy) }}
-                onResized={(newW) => handleResized(post, newW)}
-                onClick={() => handleCardClick(post)}
-              />
-            )
-          })}
-        </div>
+      <div className="board" style={{ paddingTop: displayMode ? 20 : 73 }}>
+        {posts.map((post) => (
+          <BoardCard
+            key={post.id}
+            post={post}
+            displayMode={displayMode}
+            canvasVideo={canvasVideo}
+            externalVideoLayer={externalVideoLayer}
+            videoAspect={videoAspects[post.id]}
+            onClick={() => handleCardClick(post)}
+          />
+        ))}
       </div>
 
       {isFileDrag && (
@@ -633,7 +410,21 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
       )}
 
       <style>{`
-        .wall-root { min-height: 100vh; background: #efefef; overflow: hidden; display: flex; flex-direction: column; }
+        .wall-root {
+          height: 100vh; overflow-y: auto; overflow-x: hidden;
+          background: #efefef;
+          scrollbar-width: none;
+        }
+        .wall-root::-webkit-scrollbar { display: none; }
+        /* Multi-column is what gives the staggered board: each card keeps its
+           own height and the columns fill independently. column-width rather
+           than a count so the same rules suit a wide desk screen and the
+           narrow portrait panel. */
+        .board {
+          column-width: 260px;
+          column-gap: 18px;
+          padding: 0 18px 24px;
+        }
         .topbar {
           position: fixed; top: 0; left: 0; right: 0; z-index: 100;
           display: flex; align-items: center; justify-content: space-between;
@@ -674,25 +465,6 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
         }
         .upload-btn:hover:not(.uploading) { opacity: .82; }
         .upload-btn.uploading { opacity: .5; cursor: default; }
-        .zoom-controls {
-          display: flex; align-items: center; gap: 4px;
-          background: #fff; border: 1px solid rgba(0,0,0,.12);
-          border-radius: 8px; padding: 4px 8px;
-        }
-        .zoom-controls button {
-          background: none; border: none; cursor: pointer;
-          font-size: 14px; font-weight: 600; color: #555;
-          padding: 2px 6px; border-radius: 4px; font-family: inherit; transition: background .1s;
-        }
-        .zoom-controls button:hover { background: #f0f0f0; }
-        .zoom-controls span { font-size: 11px; color: #888; min-width: 36px; text-align: center; }
-        .wall-stage {
-          flex: 1; overflow: hidden;
-          width: 100vw; height: calc(100vh - 53px);
-          cursor: grab; display: flex; align-items: center; justify-content: center;
-        }
-        .wall-stage:active { cursor: grabbing; }
-        .wall-canvas { position: relative; width: 1400px; height: 1200px; flex-shrink: 0; }
         .drop-overlay {
           position: fixed; inset: 0; z-index: 200;
           display: flex; align-items: center; justify-content: center;
@@ -762,134 +534,31 @@ export default function CreativeWall({ initialPosts, uploaderName, displayMode =
 
 interface CardProps {
   post: Post
-  initX: number
-  initY: number
-  width: number
-  zIndex: number
-  isLive: boolean
   displayMode: boolean
   canvasVideo: boolean
   externalVideoLayer: boolean
   videoAspect?: number
-  onDragging: (x: number, y: number) => void
-  onResizing: (w: number) => void
-  onMoved: (dx: number, dy: number) => void
-  onResized: (newW: number) => void
   onClick: () => void
 }
 
-function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode, canvasVideo, externalVideoLayer, videoAspect, onDragging, onResizing, onMoved, onResized, onClick }: CardProps) {
-  const resizing    = useRef(false)
-  const startX      = useRef(0)
-  const startW      = useRef(0)
-  const dragging    = useRef(false)
-  const dragStartX  = useRef(0)
-  const dragStartY  = useRef(0)
-  const posX        = useRef(initX)
-  const posY        = useRef(initY)
-  const cardRef     = useRef<HTMLElement>(null)
-  const aspectClass = post.file_type === 'video' ? 'aspect-video' : 'aspect-[4/5]'
-
-  useEffect(() => {
-    if (!dragging.current) {
-      posX.current = initX
-      posY.current = initY
-      if (cardRef.current) {
-        cardRef.current.style.transform = `translate(${initX}px, ${initY}px)`
-      }
-    }
-  }, [initX, initY])
-
-  useEffect(() => {
-    if (!resizing.current && cardRef.current) {
-      cardRef.current.style.width = `${width}px`
-    }
-  }, [width])
-
-  const setCardTransform = (x: number, y: number) => {
-    if (cardRef.current) {
-      cardRef.current.style.transform = `translate(${x}px, ${y}px)`
-    }
-  }
-
-  const onCardPointerDown = (e: React.PointerEvent) => {
-    if (resizing.current) return
-    if ((e.target as HTMLElement).classList.contains('resize-handle')) return
-    e.currentTarget.setPointerCapture(e.pointerId)
-    dragging.current   = true
-    dragStartX.current = e.clientX - posX.current
-    dragStartY.current = e.clientY - posY.current
-  }
-
-  const onCardPointerMove = (e: React.PointerEvent) => {
-    if (!dragging.current || displayMode) return
-    posX.current = e.clientX - dragStartX.current
-    posY.current = e.clientY - dragStartY.current
-    setCardTransform(posX.current, posY.current)
-    onDragging(posX.current, posY.current)
-  }
-
-  const onCardPointerUp = () => {
-    if (!dragging.current) return
-    dragging.current = false
-    const dx = posX.current - initX
-    const dy = posY.current - initY
-    if (Math.hypot(dx, dy) < 6) {
-      onClick()
-    } else if (!displayMode) {
-      onMoved(dx, dy)
-    }
-  }
-
-  const onResizePointerDown = (e: React.PointerEvent) => {
-    if (displayMode) return
-    e.stopPropagation()
-    e.preventDefault()
-    resizing.current = true
-    startX.current   = e.clientX
-    startW.current   = width
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-  }
-
-  const onResizePointerMove = (e: React.PointerEvent) => {
-    if (!resizing.current) return
-    const newW = Math.max(120, Math.min(600, startW.current + e.clientX - startX.current))
-    if (cardRef.current) cardRef.current.style.width = `${newW}px`
-    onResized(newW)
-    onResizing(newW)
-  }
-
-  const onResizePointerUp = () => { resizing.current = false }
+function BoardCard({ post, displayMode, canvasVideo, externalVideoLayer, videoAspect, onClick }: CardProps) {
+  const isVideo = post.file_type === 'video'
 
   return (
     <article
-      ref={cardRef as React.RefObject<HTMLElement>}
-      className={`wall-card ${isLive ? 'is-live' : ''} ${displayMode ? 'display-mode' : ''} ${
-        post.file_type === 'video' && externalVideoLayer ? 'external-video' : ''}`}
-      style={{
-        width,
-        position: 'absolute',
-        left: '50%',
-        top: '50%',
-        marginLeft: -width / 2,
-        marginTop: -100,
-        transform: `translate(${initX}px, ${initY}px)`,
-        zIndex,
-      }}
-      onPointerDown={onCardPointerDown}
-      onPointerMove={onCardPointerMove}
-      onPointerUp={onCardPointerUp}
+      className={`wall-card ${displayMode ? 'display-mode' : ''} ${
+        isVideo && externalVideoLayer ? 'external-video' : ''}`}
+      onClick={onClick}
     >
       <div
-        className={`card-media ${aspectClass}`}
+        className="card-media"
         // Measured from outside to place this card's video in the unrotated
         // layer; see externalVideoLayer.
-        data-video-card={post.file_type === 'video' && externalVideoLayer ? post.id : undefined}
-        // With no media element inside, the box has nothing to take its height
-        // from, so the clip's own ratio has to be supplied explicitly.
-        style={post.file_type === 'video' && externalVideoLayer
-          ? { aspectRatio: String(videoAspect ?? 16 / 9) }
-          : undefined}
+        data-video-card={isVideo && externalVideoLayer ? post.id : undefined}
+        // Images size themselves from the file, but a lazily loaded or
+        // externally drawn video has no intrinsic height, so its ratio has to
+        // be supplied. 16/9 is only the placeholder until the real one is read.
+        style={isVideo ? { aspectRatio: String(videoAspect ?? 16 / 9) } : undefined}
       >
         {post.file_type === 'image'
           // eslint-disable-next-line @next/next/no-img-element
@@ -917,40 +586,36 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
         )}
       </div>
 
-      {!displayMode && (
-        <div
-          className="resize-handle"
-          onPointerDown={onResizePointerDown}
-          onPointerMove={onResizePointerMove}
-          onPointerUp={onResizePointerUp}
-        />
-      )}
-
       <style>{`
         .wall-card {
-          cursor: grab; border-radius: 22px; overflow: visible;
+          /* A column box must not be split down the middle by a column break. */
+          break-inside: avoid;
+          -webkit-column-break-inside: avoid;
+          display: block;
+          width: 100%;
+          margin: 0 0 18px;
+          cursor: pointer; border-radius: 22px;
           background: #fff; border: 1px solid rgba(0,0,0,.08);
           box-shadow: 0 4px 20px rgba(0,0,0,.13), 0 1px 4px rgba(0,0,0,.06);
-          user-select: none; touch-action: none;
-          transition: box-shadow .2s ease;
+          transition: box-shadow .2s ease, transform .2s ease;
         }
-        .wall-card:active { cursor: grabbing; }
-        .wall-card:hover  { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); }
-        .wall-card.display-mode { cursor: pointer; }
-        .wall-card.is-live:not(.display-mode) { outline: 2px solid #4a9eff; outline-offset: 2px; }
+        .wall-card:hover { box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1); }
+        .wall-card:not(.display-mode):hover { transform: translateY(-2px); }
         /* The clip is drawn by a layer behind the wall, so this card is a hole
            punched through to it. Anything overlapping it still paints on top,
            which a layer above the wall could not allow. */
         .wall-card.external-video { background: transparent; }
         .card-media { position: relative; overflow: hidden; width: 100%; border-radius: 22px; }
-        .card-media img, .card-media video, .card-media canvas {
+        .card-media img {
+          width: 100%; height: auto; display: block;
+          transition: transform .45s ease; pointer-events: none;
+        }
+        .card-media video, .card-media canvas {
           width: 100%; height: 100%; object-fit: cover; display: block;
           transition: transform .45s ease; pointer-events: none;
         }
         .wall-card:not(.display-mode):hover .card-media img,
         .wall-card:not(.display-mode):hover .card-media video { transform: scale(1.05); }
-        .wall-card.display-mode:hover .card-media img,
-        .wall-card.display-mode:hover .card-media video { transform: scale(1.03); }
         .card-hover-overlay {
           position: absolute; inset: 0;
           background: linear-gradient(to top, rgba(0,0,0,.72) 0%, rgba(0,0,0,.1) 50%, transparent 100%);
@@ -968,14 +633,6 @@ function DraggableCard({ post, initX, initY, width, zIndex, isLive, displayMode,
         }
         .card-user    { font-size: 12px; font-weight: 700; color: #fff; }
         .card-caption { font-size: 11px; color: rgba(255,255,255,.75); margin-top: 2px; }
-        .resize-handle {
-          position: absolute; bottom: -6px; right: -6px;
-          width: 18px; height: 18px; background: #fff;
-          border: 2px solid rgba(0,0,0,.2); border-radius: 50%;
-          cursor: se-resize; opacity: 0; transition: opacity .2s; z-index: 10;
-          touch-action: none;
-        }
-        .wall-card:hover .resize-handle { opacity: 1; }
       `}</style>
     </article>
   )

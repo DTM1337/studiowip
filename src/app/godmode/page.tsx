@@ -11,7 +11,7 @@ export default function GodMode() {
   const [loading, setLoading] = useState(true)
   const [backfill, setBackfill] = useState<string | null>(null)
   const throttle = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastView = useRef({ pan: { x: 0, y: 0 }, zoom: 1 })
+  const lastScroll = useRef(0)
   const channel = useRef(supabase.channel(CHANNEL))
 
   useEffect(() => {
@@ -30,12 +30,12 @@ export default function GodMode() {
     channel.current.send({ type: 'broadcast', event: 'cmd', payload })
   }
 
-  const handleViewChange = (pan: { x: number; y: number }, zoom: number) => {
-    lastView.current = { pan, zoom }
+  const handleScrollChange = (fraction: number) => {
+    lastScroll.current = fraction
     if (throttle.current) return
     throttle.current = setTimeout(() => {
       throttle.current = null
-      send({ action: 'view-sync', pan: lastView.current.pan, zoom: lastView.current.zoom })
+      send({ action: 'view-sync', scroll: lastScroll.current })
     }, 50)
   }
 
@@ -112,7 +112,7 @@ export default function GodMode() {
 
   return (
     <>
-      <CreativeWall initialPosts={posts} uploaderName="GodMode" onViewChange={handleViewChange} onSelectPost={handleSelectPost} />
+      <CreativeWall initialPosts={posts} uploaderName="GodMode" onScrollChange={handleScrollChange} onSelectPost={handleSelectPost} />
       <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
                     display: 'flex', gap: 10, alignItems: 'center' }}>
         {backfill && (

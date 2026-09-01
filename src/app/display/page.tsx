@@ -15,7 +15,8 @@ export default function DisplayPage() {
   // miss anything uploaded after the page loaded.
   const [livePosts, setLivePosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
-  const [externalView, setExternalView] = useState<{ pan: { x: number; y: number }; zoom: number } | null>(null)
+  const [externalScroll, setExternalScroll] = useState<number | null>(null)
+  const [scrollTop, setScrollTop] = useState(0)
   const [externalSelectedPostId, setExternalSelectedPostId] = useState<string | null>(null)
   const [rotation, setRotation] = useState(0)
   const [showRulers, setShowRulers] = useState(false)
@@ -103,7 +104,7 @@ export default function DisplayPage() {
         cmdLog.current.recent = cmdLog.current.recent.slice(0, 4)
       }
       if (cmd.action === 'view-sync') {
-        setExternalView({ pan: cmd.pan as { x: number; y: number }, zoom: cmd.zoom as number })
+        setExternalScroll(cmd.scroll as number)
       } else if (cmd.action === 'select-post') {
         setExternalSelectedPostId((cmd.postId as string) ?? null)
       } else if (cmd.action === 'rotate') {
@@ -186,8 +187,7 @@ export default function DisplayPage() {
       // The wall's own background has to move to the body, otherwise it would
       // paint over the video layer sitting behind the stage.
       styleEl.textContent = `
-        .wall-root { width: ${W}px !important; height: ${H}px !important; min-height: ${H}px !important; }
-        .wall-stage { width: ${W}px !important; height: ${H}px !important; }
+        .wall-root { width: ${W}px !important; height: ${H}px !important; }
         ${rotation === 90 ? `
           body { background: #efefef; }
           .wall-root { background: transparent !important; }
@@ -211,25 +211,6 @@ export default function DisplayPage() {
   const allPosts = livePosts.length ? livePosts : posts
   const videoPosts = useMemo(() => allPosts.filter(p => p.file_type === 'video'), [allPosts])
 
-  // The card boxes are empty while the layer draws their clips, so they have no
-  // media to take a height from and each ratio has to be measured up front.
-  const [videoAspects, setVideoAspects] = useState<Record<string, number>>({})
-  useEffect(() => {
-    if (!useWallVideoLayer) return
-    let cancelled = false
-    for (const post of videoPosts) {
-      const probe = document.createElement('video')
-      probe.preload = 'metadata'
-      probe.onloadedmetadata = () => {
-        if (cancelled || !probe.videoWidth || !probe.videoHeight) return
-        setVideoAspects(prev => prev[post.id]
-          ? prev
-          : { ...prev, [post.id]: probe.videoWidth / probe.videoHeight })
-      }
-      probe.src = post.file_url
-    }
-    return () => { cancelled = true }
-  }, [useWallVideoLayer, videoPosts])
 
   const fullscreenPost = externalSelectedPostId
     ? allPosts.find(p => p.id === externalSelectedPostId) ?? null
@@ -274,13 +255,13 @@ export default function DisplayPage() {
       )}
       <div ref={stageRef}>
         {showRulers && (
-          <Rulers pan={externalView?.pan ?? { x: 0, y: 0 }} zoom={externalView?.zoom ?? 1} />
+          <Rulers pan={{ x: 0, y: scrollTop }} zoom={1} />
         )}
         <CreativeWall initialPosts={posts} uploaderName="Display" displayMode={true}
-          externalView={externalView} externalSelectedPostId={externalSelectedPostId}
+          externalScroll={externalScroll} externalSelectedPostId={externalSelectedPostId}
+          onScrollChange={(_f, top) => setScrollTop(top)}
           suppressFullscreenVideo={useVideoOverlay}
           externalVideoLayer={useWallVideoLayer}
-          videoAspects={videoAspects}
           onPostsChange={setLivePosts} />
       </div>
       {useWallVideoLayer && <WallVideoLayer posts={videoPosts} />}

@@ -143,12 +143,12 @@ export default function CreativeWall({
   }, [])
 
   /**
-   * Packs posts into columns, each one going to whichever column is shortest
-   * so far.
+   * Packs posts into columns in order, each one going to whichever column is
+   * shortest so far.
    *
-   * CSS multi-column balances total height but cannot move a card once placed,
-   * so the tails came out ragged — one column ending a couple of hundred pixels
-   * above its neighbour. Placing them here keeps the bottom edge level.
+   * Taking them in order is what puts the newest at the top left and keeps the
+   * board readable left to right: with every column still empty the first cards
+   * go to column 0, 1, 2 and so on.
    *
    * Heights are relative: every column is the same width, so 1/aspect is
    * proportional to how tall a card will be.
@@ -171,10 +171,14 @@ export default function CreativeWall({
 
     // Placing each card in the shortest column still leaves the bottom edge
     // ragged by up to a whole card, because the last few have nowhere better to
-    // go. This evens it out by moving a card across, or swapping a tall one for
-    // a shorter one, whenever that narrows the gap between the longest and
-    // shortest column. Only the gap is optimised, so the ordering stays broadly
-    // newest-first.
+    // go. Evening that out means reordering, which fights with showing them
+    // chronologically — so only the oldest quarter may be rearranged. Those sit
+    // at the bottom of the board where the order matters least, and everything
+    // newer keeps its exact place.
+    const order = new Map(posts.map((p, i) => [p.id, i]))
+    const oldest = Math.floor(posts.length * 0.75)
+    const movable = (post: Post) => (order.get(post.id) ?? 0) >= oldest
+
     for (let pass = 0; pass < 60; pass++) {
       let tallest = 0, shortest = 0
       for (let i = 1; i < columnCount; i++) {
@@ -187,6 +191,7 @@ export default function CreativeWall({
       let best = { gain: 0, move: -1, swap: -1 }
 
       for (let a = 0; a < cols[tallest].length; a++) {
+        if (!movable(cols[tallest][a])) continue
         const ha = heightOf(cols[tallest][a])
         // Moving one across: the gap closes by twice its height, and overshoots
         // once it is taller than the gap itself.
@@ -194,6 +199,7 @@ export default function CreativeWall({
         if (gain > best.gain) best = { gain, move: a, swap: -1 }
 
         for (let b = 0; b < cols[shortest].length; b++) {
+          if (!movable(cols[shortest][b])) continue
           const diff = ha - heightOf(cols[shortest][b])
           if (diff <= 0) continue
           const swapGain = gap - Math.abs(gap - 2 * diff)

@@ -81,10 +81,23 @@ export default function GodMode() {
     for (const [i, post] of videos.entries()) {
       setBackfill(`${i + 1}/${videos.length}…`)
       try {
-        const [hasRot, hasPoster] = await Promise.all([
-          fetch(rotatedVariantUrl(post.file_url), { method: 'HEAD' }).then(r => r.ok),
+        const rotUrl = rotatedVariantUrl(post.file_url)
+        const [rotOk, hasPoster] = await Promise.all([
+          fetch(rotUrl, { method: 'HEAD' }).then(r => r.ok),
           fetch(posterVariantUrl(post.file_url), { method: 'HEAD' }).then(r => r.ok),
         ])
+
+        // An existing copy still needs redoing if it predates the resolution
+        // cap: those clips are the ones that stutter on the panel.
+        const oversized = rotOk && await new Promise<boolean>(res => {
+          const probe = document.createElement('video')
+          probe.preload = 'metadata'
+          probe.onloadedmetadata = () => res(Math.max(probe.videoWidth, probe.videoHeight) > 1920)
+          probe.onerror = () => res(false)
+          probe.src = rotUrl
+        })
+        const hasRot = rotOk && !oversized
+
         if (hasRot && hasPoster) { skipped++; continue }
 
         const original = await fetch(post.file_url)
@@ -100,7 +113,8 @@ export default function GodMode() {
         if (!hasRot) {
           const rotated = await rotateVideo90(
             source,
-            r => setBackfill(`${i + 1}/${videos.length} — roterar ${Math.round(r * 100)}%`),
+            r => setBackfill(
+              `${i + 1}/${videos.length} — ${oversized ? 'skalar om' : 'roterar'} ${Math.round(r * 100)}%`),
           )
           await putVariant(post.file_url, 'rot90', rotated)
         }

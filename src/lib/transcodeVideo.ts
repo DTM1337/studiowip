@@ -1,6 +1,24 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
 
+/**
+ * Longest edge allowed, in either orientation.
+ *
+ * A 1440p clip came out at 7.8 Mbps against 1-3 for everything else, and it was
+ * the one that stuttered: too much to pull over the office network and decode
+ * on a TV. A wall display gains nothing above 1080p.
+ *
+ * Fitting inside a square box rather than 1920x1080 so portrait clips keep
+ * their full height instead of being squeezed to fit a landscape frame.
+ */
+const MAX_EDGE = 1920
+const FIT = `scale=w='min(${MAX_EDGE},iw)':h='min(${MAX_EDGE},ih)':force_original_aspect_ratio=decrease`
+// Even dimensions, which yuv420p requires.
+const EVEN = 'scale=trunc(iw/2)*2:trunc(ih/2)*2'
+// A ceiling on top of CRF, so a high-motion shot cannot spike past what the
+// panel can stream.
+const RATE_CAP = ['-maxrate', '4M', '-bufsize', '8M']
+
 let ffmpeg: FFmpeg | null = null
 let loaded = false
 
@@ -43,7 +61,8 @@ export async function transcodeToH264(
     '-preset', 'fast',
     '-pix_fmt', 'yuv420p',
     '-movflags', 'faststart',
-    '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+    '-vf', `${FIT},${EVEN}`,
+    ...RATE_CAP,
     '-metadata:s:v:0', 'rotate=0',
     outputName,
   ])
@@ -81,13 +100,14 @@ export async function rotateVideo90(
   await ff.exec([
     '-i', inputName,
     // transpose=1 is 90° clockwise, matching the direction the display rotates.
-    '-vf', 'transpose=1,scale=trunc(iw/2)*2:trunc(ih/2)*2',
+    '-vf', `transpose=1,${FIT},${EVEN}`,
     '-vcodec', 'libx264',
     '-acodec', 'aac',
     '-crf', '23',
     '-preset', 'fast',
     '-pix_fmt', 'yuv420p',
     '-movflags', 'faststart',
+    ...RATE_CAP,
     '-metadata:s:v:0', 'rotate=0',
     outputName,
   ])

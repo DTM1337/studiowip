@@ -1,5 +1,6 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
+import { MSE_WIDTH, MSE_HEIGHT } from './mseVariant'
 
 /**
  * Longest edge allowed, in either orientation.
@@ -118,4 +119,71 @@ export async function rotateVideo90(
 
   const rotated = out instanceof Uint8Array ? out : new Uint8Array(out as unknown as ArrayBuffer)
   return new File([rotated.buffer as ArrayBuffer], 'video-rot90.mp4', { type: 'video/mp4' })
+}
+
+/**
+ * A copy normalised for gapless playback through MediaSource.
+ *
+ * Appending clips into one buffer only works if they are interchangeable to the
+ * decoder, so this pins everything that must not vary between them: the same
+ * frame size, the same frame rate, the same profile and level, and no audio —
+ * the display is muted, and an absent track is one less thing to match.
+ *
+ * Fragmented MP4 because MediaSource cannot take a plain one: it needs moof/mdat
+ * fragments rather than a single index at the front of the file.
+ *
+ * Padded rather than stretched, so a clip that is not 9:16 keeps its shape and
+ * gains black bars instead.
+ */
+export async function makeMseVariant(
+  file: File,
+  onProgress?: (ratio: number) => void,
+): Promise<File> {
+  const ff = await getFFmpeg()
+
+  if (onProgress) {
+    ff.on('progress', ({ progress }) => onProgress(progress))
+  }
+
+  const inputName = `mse-input.${file.name.split('.').pop() || 'mp4'}`
+  const outputName = 'mse-output.mp4'
+
+  await ff.writeFile(inputName, await fetchFile(file))
+  await ff.exec([
+    '-i', inputName,
+    '-vf', [
+      // Turned first, for the same reason the rotated copy exists: the panel
+      // will not rotate a video at playback time.
+      'transpose=1',
+      `scale=${MSE_WIDTH}:${MSE_HEIGHT}:force_original_aspect_ratio=decrease`,
+      `pad=${MSE_WIDTH}:${MSE_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black`,
+      'setsar=1',
+    ].join(','),
+    '-c:v', 'libx264',
+    // Pinned so every clip declares the same codec string; MediaSource rejects
+    // a buffer whose segments disagree.
+    '-profile:v', 'main',
+    '-level:v', '4.0',
+    '-pix_fmt', 'yuv420p',
+    '-r', '30',
+    // A keyframe every two seconds, at fixed intervals: fragments have to start
+    // on one, and letting the encoder place them by scene change would not.
+    '-g', '60',
+    '-keyint_min', '60',
+    '-sc_threshold', '0',
+    '-crf', '23',
+    '-preset', 'fast',
+    ...RATE_CAP,
+    '-an',
+    '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+    '-metadata:s:v:0', 'rotate=0',
+    outputName,
+  ])
+
+  const out = await ff.readFile(outputName)
+  await ff.deleteFile(inputName)
+  await ff.deleteFile(outputName)
+
+  const bytes = out instanceof Uint8Array ? out : new Uint8Array(out as unknown as ArrayBuffer)
+  return new File([bytes.buffer as ArrayBuffer], 'video-mse.mp4', { type: 'video/mp4' })
 }

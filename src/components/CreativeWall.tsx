@@ -285,12 +285,13 @@ export default function CreativeWall({
       let fileToUpload = file
       let rotatedFile: File | null = null
       let posterFile: File | null = null
+      let mseFile: File | null = null
       const isVideo = file.type.startsWith('video/')
 
       if (isVideo) {
         try {
           step('Förbereder film', 0, 0)
-          const { transcodeToH264, rotateVideo90 } = await import('@/lib/transcodeVideo')
+          const { transcodeToH264, rotateVideo90, makeMseVariant } = await import('@/lib/transcodeVideo')
           fileToUpload = await transcodeToH264(file, r => step('Konverterar film', 2, 50, r))
           // The board shows this instead of playing the clip.
           try {
@@ -303,9 +304,16 @@ export default function CreativeWall({
           // a pre-rotated copy is made here. Failing to build it only costs
           // correct rotation on the display, so it must not fail the upload.
           try {
-            rotatedFile = await rotateVideo90(fileToUpload, r => step('Skapar roterad version', 50, 85, r))
+            rotatedFile = await rotateVideo90(fileToUpload, r => step('Skapar roterad version', 50, 70, r))
           } catch (e) {
             console.warn('Rotated variant failed, display will use the original:', e)
+          }
+          // Normalised copy for gapless playlist playback. Its absence only
+          // costs the seamless join, so it must not fail the upload either.
+          try {
+            mseFile = await makeMseVariant(fileToUpload, r => step('Förbereder spellista', 70, 88, r))
+          } catch (e) {
+            console.warn('MSE variant failed, playlist will play clip by clip:', e)
           }
         } catch (e) {
           console.warn('Transcoding failed, uploading original:', e)
@@ -318,27 +326,35 @@ export default function CreativeWall({
       const urlRes = await fetch('/api/upload-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ext, rotated: !!rotatedFile, poster: !!posterFile }),
+        body: JSON.stringify({ ext, rotated: !!rotatedFile, poster: !!posterFile, mse: !!mseFile }),
       })
       if (!urlRes.ok) {
         const { error } = await urlRes.json().catch(() => ({ error: 'Kunde inte starta uppladdning' }))
         alert(`Upload error: ${error}`); continue
       }
-      const { upload, url: publicUrl, rotatedUpload, posterUpload } = await urlRes.json()
+      const { upload, url: publicUrl, rotatedUpload, posterUpload, mseUpload } = await urlRes.json()
 
-      const from = isVideo ? 85 : 0
+      const from = isVideo ? 88 : 0
       try {
-        await putSigned(upload.signedUrl, fileToUpload, r => step('Laddar upp', from, isVideo ? 94 : 90, r))
+        await putSigned(upload.signedUrl, fileToUpload, r => step('Laddar upp', from, isVideo ? 93 : 90, r))
       } catch (e) {
         alert(`Upload error: ${e instanceof Error ? e.message : e}`); continue
       }
 
       if (rotatedFile && rotatedUpload) {
         try {
-          await putSigned(rotatedUpload.signedUrl, rotatedFile, r => step('Laddar upp roterad', 94, 99, r))
+          await putSigned(rotatedUpload.signedUrl, rotatedFile, r => step('Laddar upp roterad', 93, 96, r))
         } catch (e) {
           // Only costs correct rotation on the display, so it must not fail the post.
           console.warn('Rotated upload failed:', e)
+        }
+      }
+
+      if (mseFile && mseUpload) {
+        try {
+          await putSigned(mseUpload.signedUrl, mseFile, r => step('Laddar upp spellistversion', 96, 99, r))
+        } catch (e) {
+          console.warn('MSE upload failed:', e)
         }
       }
 

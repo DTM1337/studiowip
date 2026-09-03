@@ -13,8 +13,9 @@ import { randomUUID } from 'crypto'
  * expires, so no public write access has to be opened.
  */
 export async function POST(req: NextRequest) {
-  const { ext, rotated, poster, forUrl, variant } = await req.json() as
-    { ext?: string; rotated?: boolean; poster?: boolean; forUrl?: string; variant?: string }
+  const { ext, rotated, poster, mse, forUrl, variant } = await req.json() as
+    { ext?: string; rotated?: boolean; poster?: boolean; mse?: boolean
+      forUrl?: string; variant?: string }
 
   // Backfill mode: a rotated copy for a clip that already exists, named after
   // the original rather than a fresh id.
@@ -29,7 +30,9 @@ export async function POST(req: NextRequest) {
     }
     const dot = objectName.lastIndexOf('.')
     const stem = dot === -1 ? objectName : objectName.slice(0, dot)
-    const suffix = variant === 'poster' ? '-poster.jpg' : '-rot90.mp4'
+    const suffix = variant === 'poster' ? '-poster.jpg'
+      : variant === 'mse' ? '-mse.mp4'
+      : '-rot90.mp4'
 
     // upsert so a variant can be regenerated over a bad one.
     const r = await supabaseAdmin.storage.from('media')
@@ -67,11 +70,19 @@ export async function POST(req: NextRequest) {
     if (!p.error) posterUpload = { path: p.data.path, token: p.data.token, signedUrl: p.data.signedUrl }
   }
 
+  let mseUpload: { path: string; token: string; signedUrl: string } | null = null
+  if (mse) {
+    const m = await supabaseAdmin.storage.from('media').createSignedUploadUrl(`${id}-mse.mp4`)
+    // Not fatal: without it the playlist falls back to one clip at a time.
+    if (!m.error) mseUpload = { path: m.data.path, token: m.data.token, signedUrl: m.data.signedUrl }
+  }
+
   return NextResponse.json({
     upload: { path: main.data.path, token: main.data.token, signedUrl: main.data.signedUrl },
     url: publicUrl,
     rotatedUpload,
     rotatedUrl,
     posterUpload,
+    mseUpload,
   })
 }

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import CreativeWall from '@/components/CreativeWall'
 import RotatedVideoOverlay from '@/components/RotatedVideoOverlay'
+import SeamlessPlaylist from '@/components/SeamlessPlaylist'
 import Rulers from '@/components/Rulers'
 import { Post } from '@/types'
 import { supabase } from '@/lib/supabase'
@@ -27,6 +28,9 @@ export default function DisplayPage() {
   const [playlist, setPlaylist] = useState<string[]>([])
   // The overlay owns which clip is showing; this is only whether it runs.
   const [playlistPlaying, setPlaylistPlaying] = useState(false)
+  // Set when MediaSource cannot carry the playlist, so it drops to playing one
+  // clip at a time rather than showing nothing.
+  const [seamlessFailed, setSeamlessFailed] = useState(false)
   const cmdLog = useRef({ total: 0, rotates: 0, last: '-', at: 0, recent: [] as string[] })
 
   useEffect(() => {
@@ -54,7 +58,7 @@ export default function DisplayPage() {
       const fs = document.documentElement.dataset.fsVideo
       setDebug([
         `rot=${rotation} cursor=${hideCursor ? 'hidden' : 'visible'} video=${vids}`,
-        `playlist=${playlist.length} playing=${playlistPlaying}`,
+        `playlist=${playlist.length} playing=${playlistPlaying}${seamlessFailed ? ' (utan mse)' : ''}`,
         ...(fs ? [`FS ${fs}`] : []),
         `cmds=${c.total} rotates=${c.rotates} last=${c.last} ${ago} ago subs=${subs}`,
         ...c.recent.map(r => `  ${r}`),
@@ -63,7 +67,7 @@ export default function DisplayPage() {
     tick()
     const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
-  }, [rotation, showDebug, hideCursor, playlist, playlistPlaying])
+  }, [rotation, showDebug, hideCursor, playlist, playlistPlaying, seamlessFailed])
 
   const loadPlaylist = () => {
     fetch('/api/playlist')
@@ -271,9 +275,15 @@ export default function DisplayPage() {
           onPostsChange={setLivePosts} />
       </div>
       {useVideoOverlay && (
-        // Not keyed per clip: the overlay keeps two elements alive and swaps
-        // between them, which is what makes the change of clip seamless.
-        <RotatedVideoOverlay srcs={overlaySrcs} rotation={rotation} />
+        // The playlist streams through one buffer so the decoder never restarts
+        // between clips; a single clip, or a panel without MediaSource, uses the
+        // plain player.
+        playlistRunning && !seamlessFailed
+          ? <SeamlessPlaylist
+              srcs={overlaySrcs}
+              onUnsupported={() => setSeamlessFailed(true)}
+            />
+          : <RotatedVideoOverlay srcs={overlaySrcs} rotation={rotation} />
       )}
     </>
   )

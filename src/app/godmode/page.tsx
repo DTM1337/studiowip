@@ -121,7 +121,8 @@ export default function GodMode() {
     if (!confirm(`Skapa roterade versioner för ${videos.length} filmer? Det tar en stund.`)) return
 
     const { rotatedVariantUrl, posterVariantUrl } = await import('@/lib/rotatedVariant')
-    const { rotateVideo90 } = await import('@/lib/transcodeVideo')
+    const { mseVariantUrl } = await import('@/lib/mseVariant')
+    const { rotateVideo90, makeMseVariant } = await import('@/lib/transcodeVideo')
     const { extractPoster } = await import('@/lib/videoPoster')
 
     // Uploading a variant for a clip that already exists.
@@ -146,9 +147,10 @@ export default function GodMode() {
       setBackfill(`${i + 1}/${videos.length}…`)
       try {
         const rotUrl = rotatedVariantUrl(post.file_url)
-        const [rotOk, hasPoster] = await Promise.all([
+        const [rotOk, hasPoster, hasMse] = await Promise.all([
           fetch(rotUrl, { method: 'HEAD' }).then(r => r.ok),
           fetch(posterVariantUrl(post.file_url), { method: 'HEAD' }).then(r => r.ok),
+          fetch(mseVariantUrl(post.file_url), { method: 'HEAD' }).then(r => r.ok),
         ])
 
         // An existing copy still needs redoing if it predates the resolution
@@ -162,7 +164,7 @@ export default function GodMode() {
         })
         const hasRot = rotOk && !oversized
 
-        if (hasRot && hasPoster) { skipped++; continue }
+        if (hasRot && hasPoster && hasMse) { skipped++; continue }
 
         const original = await fetch(post.file_url)
         if (!original.ok) throw new Error(`hämtning ${original.status}`)
@@ -181,6 +183,14 @@ export default function GodMode() {
               `${i + 1}/${videos.length} — ${oversized ? 'skalar om' : 'roterar'} ${Math.round(r * 100)}%`),
           )
           await putVariant(post.file_url, 'rot90', rotated)
+        }
+
+        if (!hasMse) {
+          const normalised = await makeMseVariant(
+            source,
+            r => setBackfill(`${i + 1}/${videos.length} — spellista ${Math.round(r * 100)}%`),
+          )
+          await putVariant(post.file_url, 'mse', normalised)
         }
         done++
       } catch (e) {

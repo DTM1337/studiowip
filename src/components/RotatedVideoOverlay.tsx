@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { rotatedVariantUrl, posterVariantUrl } from '@/lib/rotatedVariant'
+import { rotatedVariantUrl } from '@/lib/rotatedVariant'
 
 type Props = {
   /** One clip, or a list to play in sequence. A single one loops. */
@@ -25,11 +25,12 @@ type Props = {
  * which has a single hardware decoder — the same constraint that shapes
  * everything else here.
  *
- * Seamlessness without a second decoder comes from two things instead: the next
- * clip is fetched into memory while the current one plays, so switching is a
- * local source change rather than a download, and its still frame is painted
- * over the element during the switch, so the swap reads as a cut rather than a
- * black flash.
+ * The next clip is fetched into memory while the current one plays, so
+ * switching is a local source change rather than a download. That is as close
+ * to seamless as this panel gets: changing source restarts its decoder, which
+ * costs a few hundred milliseconds whatever the data is doing, and shows as a
+ * brief black frame between clips. Covering that with the clip's still frame
+ * was tried and read as a stutter rather than a cut, so the gap is left plain.
  *
  * Uploads made before the variant existed have none, so a missing file falls
  * back to the original plus a CSS rotation — correct in a desktop browser,
@@ -38,12 +39,8 @@ type Props = {
 export default function RotatedVideoOverlay({ srcs, rotation }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
-  const posterBoxRef = useRef<HTMLDivElement>(null)
 
   const [index, setIndex] = useState(0)
-  // Covers the element while the next clip takes over, so the change of source
-  // never shows through as black.
-  const [covering, setCovering] = useState(true)
 
   // Only a quarter turn clockwise has a baked variant; anything else has to
   // fall back to transforming the element.
@@ -97,26 +94,11 @@ export default function RotatedVideoOverlay({ srcs, rotation }: Props) {
     if (!video || !box) return
 
     let stopped = false
-    setCovering(true)
 
     const layout = () => {
       const vw = window.innerWidth
       const vh = window.innerHeight
       const quarter = rotation === 90 || rotation === 270
-
-      // The still frame is a frame of the original, so it always needs the
-      // rotation applied, even when the clip beside it is already turned.
-      const poster = posterBoxRef.current
-      if (poster) {
-        const pw = quarter ? vh : vw
-        const ph = quarter ? vw : vh
-        poster.style.width = `${pw}px`
-        poster.style.height = `${ph}px`
-        poster.style.left = `${(vw - pw) / 2}px`
-        poster.style.top = `${(vh - ph) / 2}px`
-        poster.style.transformOrigin = 'center center'
-        poster.style.transform = `rotate(${rotation}deg)`
-      }
 
       if (useVariant) {
         // The picture is already turned, so the element is laid out plainly and
@@ -166,7 +148,7 @@ export default function RotatedVideoOverlay({ srcs, rotation }: Props) {
     const start = () => {
       if (started || stopped) return
       started = true
-      video.play().then(() => setCovering(false)).catch(() => setCovering(false))
+      video.play().catch(() => {})
     }
     const startWhenBuffered = () => { if (video.readyState >= 4) start() }
 
@@ -234,29 +216,6 @@ export default function RotatedVideoOverlay({ srcs, rotation }: Props) {
         />
       </div>
 
-      {/* Above the clip while it changes over. An <img>, which the panel does
-          rotate correctly, so this works where a second <video> could not. */}
-      {current && (
-        <div
-          ref={posterBoxRef}
-          style={{
-            position: 'absolute', zIndex: 2,
-            opacity: covering ? 1 : 0,
-            // Appears at once and only fades away. Fading it in would be too
-            // late to cover anything: the swap itself takes about one frame,
-            // so a cover that eases in over 180ms never arrives.
-            transition: covering ? 'none' : 'opacity .18s ease',
-            pointerEvents: 'none',
-          }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={posterVariantUrl(current)}
-            alt=""
-            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-          />
-        </div>
-      )}
     </div>
   )
 }

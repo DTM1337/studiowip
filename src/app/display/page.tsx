@@ -25,7 +25,8 @@ export default function DisplayPage() {
   const [showDebug, setShowDebug] = useState(false)
   const [hideCursor, setHideCursor] = useState(false)
   const [playlist, setPlaylist] = useState<string[]>([])
-  const [playlistPos, setPlaylistPos] = useState<number | null>(null)
+  // The overlay owns which clip is showing; this is only whether it runs.
+  const [playlistPlaying, setPlaylistPlaying] = useState(false)
   const cmdLog = useRef({ total: 0, rotates: 0, last: '-', at: 0, recent: [] as string[] })
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export default function DisplayPage() {
       const fs = document.documentElement.dataset.fsVideo
       setDebug([
         `rot=${rotation} cursor=${hideCursor ? 'hidden' : 'visible'} video=${vids}`,
-        `playlist=${playlist.length} pos=${playlistPos ?? '-'}`,
+        `playlist=${playlist.length} playing=${playlistPlaying}`,
         ...(fs ? [`FS ${fs}`] : []),
         `cmds=${c.total} rotates=${c.rotates} last=${c.last} ${ago} ago subs=${subs}`,
         ...c.recent.map(r => `  ${r}`),
@@ -62,7 +63,7 @@ export default function DisplayPage() {
     tick()
     const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
-  }, [rotation, showDebug, hideCursor, playlist, playlistPos])
+  }, [rotation, showDebug, hideCursor, playlist, playlistPlaying])
 
   const loadPlaylist = () => {
     fetch('/api/playlist')
@@ -117,7 +118,7 @@ export default function DisplayPage() {
       } else if (cmd.action === 'playlist-changed') {
         loadPlaylist()
       } else if (cmd.action === 'playlist-toggle') {
-        setPlaylistPos(p => p === null ? 0 : null)
+        setPlaylistPlaying(p => !p)
       }
     }).subscribe()
     return () => { supabase.removeChannel(ch) }
@@ -210,20 +211,20 @@ export default function DisplayPage() {
     .map(id => allPosts.find(p => p.id === id))
     .filter((p): p is Post => !!p && p.file_type === 'video')
 
-  const playlistPost = playlistPos !== null && playlistPosts.length
-    ? playlistPosts[playlistPos % playlistPosts.length]
-    : null
+  const playlistRunning = playlistPlaying && playlistPosts.length > 0
 
   const selectedPostObj = externalSelectedPostId
     ? allPosts.find(p => p.id === externalSelectedPostId) ?? null
     : null
 
   // The playlist takes the screen while it runs, over any single selection.
-  const fullscreenPost = playlistPost ?? selectedPostObj
-  // The overlay drives the playlist at any angle; for a single clip it is only
-  // needed when rotated, since unrotated the wall's own view is already right.
-  const useVideoOverlay = fullscreenPost?.file_type === 'video' &&
-    (playlistPost !== null || rotation !== 0)
+  // The overlay drives it at any angle; for a single clip it is only needed
+  // when rotated, since unrotated the wall's own view is already right.
+  const overlaySrcs = playlistRunning
+    ? playlistPosts.map(p => p.file_url)
+    : (selectedPostObj?.file_type === 'video' && rotation !== 0 ? [selectedPostObj.file_url] : [])
+  const useVideoOverlay = overlaySrcs.length > 0
+  const fullscreenPost = playlistRunning ? null : selectedPostObj
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#efefef', display: 'flex',
@@ -269,19 +270,10 @@ export default function DisplayPage() {
           suppressFullscreenVideo={useVideoOverlay}
           onPostsChange={setLivePosts} />
       </div>
-      {useVideoOverlay && fullscreenPost && (
-        <RotatedVideoOverlay
-          // Remounts per clip, so each starts from a clean buffer rather than
-          // inheriting the previous one's state.
-          key={fullscreenPost.id}
-          src={fullscreenPost.file_url}
-          rotation={rotation}
-          // Wrapped rather than left to climb, so the position stays readable
-          // in the diagnostics on a screen that runs for weeks.
-          onEnded={playlistPost
-            ? () => setPlaylistPos(p => ((p ?? 0) + 1) % Math.max(1, playlistPosts.length))
-            : undefined}
-        />
+      {useVideoOverlay && (
+        // Not keyed per clip: the overlay keeps two elements alive and swaps
+        // between them, which is what makes the change of clip seamless.
+        <RotatedVideoOverlay srcs={overlaySrcs} rotation={rotation} />
       )}
     </>
   )

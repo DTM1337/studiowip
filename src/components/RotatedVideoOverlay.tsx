@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { rotatedVariantUrl } from '@/lib/rotatedVariant'
+import { rotatedVariantUrl, posterVariantUrl } from '@/lib/rotatedVariant'
 
 type Props = {
   /** One clip, or a list to play in sequence. A single one loops. */
@@ -11,7 +11,7 @@ type Props = {
 }
 
 /**
- * Fullscreen video for a rotated display, played from two alternating elements.
+ * Fullscreen video for a rotated display.
  *
  * Rotation is baked into the file rather than applied at playback. Samsung
  * Tizen ignores CSS transforms on a <video> — inherited or on the element —
@@ -20,22 +20,30 @@ type Props = {
  * them: the element is never transformed, so nothing depends on how the browser
  * composites video.
  *
- * Two elements because one is not seamless: remounting per clip meant a fresh
- * download and a wait for the buffer, showing black in between. Here the hidden
- * element already holds the next clip, loaded and ready, so advancing is a
- * swap rather than a start.
+ * Exactly one <video> exists at a time. Two alternating elements gave a
+ * genuinely seamless swap in a desktop browser and a black screen on the panel,
+ * which has a single hardware decoder — the same constraint that shapes
+ * everything else here.
+ *
+ * Seamlessness without a second decoder comes from two things instead: the next
+ * clip is fetched into memory while the current one plays, so switching is a
+ * local source change rather than a download, and its still frame is painted
+ * over the element during the switch, so the swap reads as a cut rather than a
+ * black flash.
  *
  * Uploads made before the variant existed have none, so a missing file falls
  * back to the original plus a CSS rotation — correct in a desktop browser,
  * wrong on the TV, but better than not playing.
  */
 export default function RotatedVideoOverlay({ srcs, rotation }: Props) {
+  const videoRef = useRef<HTMLVideoElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
-  const slotRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)]
+  const posterBoxRef = useRef<HTMLDivElement>(null)
 
-  // Which element is on screen, and which clip it holds.
-  const [slot, setSlot] = useState(0)
   const [index, setIndex] = useState(0)
+  // Covers the element while the next clip takes over, so the change of source
+  // never shows through as black.
+  const [covering, setCovering] = useState(true)
 
   // Only a quarter turn clockwise has a baked variant; anything else has to
   // fall back to transforming the element.
@@ -45,45 +53,70 @@ export default function RotatedVideoOverlay({ srcs, rotation }: Props) {
 
   const list = srcs.length ? srcs : ['']
   const advances = list.length > 1
-  const resolve = (s: string) => (useVariant && s ? rotatedVariantUrl(s) : s)
+  const current = list[index % list.length]
+  const playbackSrc = useVariant && current ? rotatedVariantUrl(current) : current
 
-  // Assign sources imperatively rather than through props: React would swap the
-  // src of whichever element re-renders, and the point of the hidden one is
-  // that its buffer survives the change of clip.
+  /**
+   * The next clip, held as a blob so the switch is instant.
+   *
+   * Relying on the HTTP cache would leave it to chance; a blob is certain, and
+   * one clip in memory is a few megabytes at the size cap.
+   */
+  const prefetched = useRef<{ src: string; url: string } | null>(null)
   useEffect(() => {
-    const visible = slotRefs[slot].current
-    const hidden = slotRefs[1 - slot].current
-    if (!visible) return
+    if (!advances) return
+    let cancelled = false
 
-    const wanted = resolve(list[index % list.length])
-    if (visible.getAttribute('src') !== wanted) {
-      visible.src = wanted
-      visible.load()
-    }
+    const nextSrc = list[(index + 1) % list.length]
+    const nextUrl = useVariant && nextSrc ? rotatedVariantUrl(nextSrc) : nextSrc
+    if (!nextUrl || prefetched.current?.src === nextUrl) return
 
-    if (hidden && advances) {
-      const nextWanted = resolve(list[(index + 1) % list.length])
-      if (hidden.getAttribute('src') !== nextWanted) {
-        hidden.src = nextWanted
-        // preload="auto" plus an explicit load so it reaches a full buffer
-        // well before it is needed.
-        hidden.load()
-      }
-      hidden.pause()
-    }
+    fetch(nextUrl)
+      .then(r => r.ok ? r.blob() : null)
+      .then(blob => {
+        if (cancelled || !blob) return
+        if (prefetched.current) URL.revokeObjectURL(prefetched.current.url)
+        prefetched.current = { src: nextUrl, url: URL.createObjectURL(blob) }
+      })
+      .catch(() => {})
+
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slot, index, useVariant, list.join('|')])
+  }, [index, useVariant, advances, list.join('|')])
+
+  // Released only on unmount: the blob in flight belongs to the next clip and
+  // must outlive every render in between.
+  useEffect(() => () => {
+    if (prefetched.current) URL.revokeObjectURL(prefetched.current.url)
+    prefetched.current = null
+  }, [])
 
   useEffect(() => {
+    const video = videoRef.current
     const box = boxRef.current
-    if (!box) return
+    if (!video || !box) return
 
     let stopped = false
+    setCovering(true)
 
     const layout = () => {
       const vw = window.innerWidth
       const vh = window.innerHeight
       const quarter = rotation === 90 || rotation === 270
+
+      // The still frame is a frame of the original, so it always needs the
+      // rotation applied, even when the clip beside it is already turned.
+      const poster = posterBoxRef.current
+      if (poster) {
+        const pw = quarter ? vh : vw
+        const ph = quarter ? vw : vh
+        poster.style.width = `${pw}px`
+        poster.style.height = `${ph}px`
+        poster.style.left = `${(vw - pw) / 2}px`
+        poster.style.top = `${(vh - ph) / 2}px`
+        poster.style.transformOrigin = 'center center'
+        poster.style.transform = `rotate(${rotation}deg)`
+      }
 
       if (useVariant) {
         // The picture is already turned, so the element is laid out plainly and
@@ -109,13 +142,22 @@ export default function RotatedVideoOverlay({ srcs, rotation }: Props) {
     layout()
     window.addEventListener('resize', layout)
 
-    const visible = slotRefs[slot].current
-    if (!visible) return
+    // Play from the prefetched copy when it is the clip now due.
+    const ready = prefetched.current
+    if (ready && ready.src === playbackSrc) {
+      video.src = ready.url
+      prefetched.current = null
+      // Revoked once the element has taken it, on the next source change.
+      video.dataset.blobUrl = ready.url
+    } else {
+      video.src = playbackSrc
+    }
+    video.load()
 
     // A missing variant surfaces as a media error; drop to the original rather
     // than leaving a black screen.
     const onError = () => { if (useVariant) setUseVariant(false) }
-    visible.addEventListener('error', onError)
+    video.addEventListener('error', onError)
 
     // Waiting for a buffer rather than starting at the first playable frame.
     // `canplay` fires with barely two frames ready, so playback began and then
@@ -124,45 +166,40 @@ export default function RotatedVideoOverlay({ srcs, rotation }: Props) {
     const start = () => {
       if (started || stopped) return
       started = true
-      visible.play().catch(() => {})
+      video.play().then(() => setCovering(false)).catch(() => setCovering(false))
     }
-    const startWhenBuffered = () => { if (visible.readyState >= 4) start() }
+    const startWhenBuffered = () => { if (video.readyState >= 4) start() }
 
-    visible.addEventListener('canplaythrough', start)
-    visible.addEventListener('progress', startWhenBuffered)
-    visible.addEventListener('loadeddata', startWhenBuffered)
+    video.addEventListener('canplaythrough', start)
+    video.addEventListener('progress', startWhenBuffered)
+    video.addEventListener('loadeddata', startWhenBuffered)
     // A slow connection may never reach HAVE_ENOUGH_DATA, and a clip that never
     // plays is worse than one that stutters.
     const impatient = window.setTimeout(start, 4000)
 
     // Once running, a pause is something to recover from rather than wait out.
-    // The pause that comes with reaching the end is not, or the swap would be
+    // The pause that comes with reaching the end is not, or the advance would be
     // fighting a restart of the clip it is trying to leave.
-    const resume = () => { if (started && !visible.ended) visible.play().catch(() => {}) }
-    visible.addEventListener('pause', resume)
+    const resume = () => { if (started && !video.ended) video.play().catch(() => {}) }
+    video.addEventListener('pause', resume)
 
-    const finish = () => {
-      if (!advances) return
-      setIndex(i => (i + 1) % list.length)
-      setSlot(s => 1 - s)
-    }
-    visible.addEventListener('ended', finish)
+    const finish = () => { if (advances) setIndex(i => (i + 1) % list.length) }
+    video.addEventListener('ended', finish)
 
     startWhenBuffered()
 
     const watchdog = window.setInterval(() => {
       if (stopped) return
-      if (started && visible.paused && !visible.ended) visible.play().catch(() => {})
+      if (started && video.paused && !video.ended) video.play().catch(() => {})
       const r = box.getBoundingClientRect()
-      const hidden = slotRefs[1 - slot].current
       document.documentElement.dataset.fsVideo =
-        `src=${useVariant ? 'rot90' : 'original'} ready=${visible.readyState}` +
-        ` paused=${visible.paused} t=${visible.currentTime.toFixed(1)}` +
-        ` nat=${visible.videoWidth}x${visible.videoHeight}` +
+        `src=${useVariant ? 'rot90' : 'original'} ready=${video.readyState}` +
+        ` paused=${video.paused} t=${video.currentTime.toFixed(1)}` +
+        ` nat=${video.videoWidth}x${video.videoHeight}` +
         ` box=${Math.round(r.width)}x${Math.round(r.height)}` +
-        ` buffered=${visible.buffered.length ? visible.buffered.end(visible.buffered.length - 1).toFixed(1) : 0}` +
-        (advances ? ` next=${hidden ? hidden.readyState : '-'}` : '') +
-        ` err=${visible.error ? visible.error.code : '-'}`
+        ` buffered=${video.buffered.length ? video.buffered.end(video.buffered.length - 1).toFixed(1) : 0}` +
+        (advances ? ` clip=${(index % list.length) + 1}/${list.length} next=${prefetched.current ? 'klar' : '-'}` : '') +
+        ` err=${video.error ? video.error.code : '-'}`
     }, 1000)
 
     return () => {
@@ -170,41 +207,56 @@ export default function RotatedVideoOverlay({ srcs, rotation }: Props) {
       window.clearInterval(watchdog)
       window.clearTimeout(impatient)
       window.removeEventListener('resize', layout)
-      visible.removeEventListener('error', onError)
-      visible.removeEventListener('canplaythrough', start)
-      visible.removeEventListener('progress', startWhenBuffered)
-      visible.removeEventListener('loadeddata', startWhenBuffered)
-      visible.removeEventListener('pause', resume)
-      visible.removeEventListener('ended', finish)
+      video.removeEventListener('error', onError)
+      video.removeEventListener('canplaythrough', start)
+      video.removeEventListener('progress', startWhenBuffered)
+      video.removeEventListener('loadeddata', startWhenBuffered)
+      video.removeEventListener('pause', resume)
+      video.removeEventListener('ended', finish)
+      const spent = video.dataset.blobUrl
+      if (spent) { URL.revokeObjectURL(spent); delete video.dataset.blobUrl }
       delete document.documentElement.dataset.fsVideo
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slot, index, rotation, useVariant, advances, list.length])
+  }, [playbackSrc, rotation, useVariant, advances, list.length])
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: '#000', overflow: 'hidden' }}>
       <div ref={boxRef} style={{ position: 'absolute' }}>
-        {[0, 1].map(i => (
-          <video
-            key={i}
-            ref={slotRefs[i]}
-            muted
-            // A single clip has nothing to advance to, so it repeats itself.
-            loop={!advances}
-            playsInline
-            preload="auto"
-            style={{
-              position: 'absolute', inset: 0,
-              width: '100%', height: '100%',
-              objectFit: 'contain', display: 'block',
-              // Kept mounted and merely hidden: unmounting would throw away the
-              // buffer that makes the swap seamless.
-              opacity: i === slot ? 1 : 0,
-              zIndex: i === slot ? 1 : 0,
-            }}
-          />
-        ))}
+        <video
+          ref={videoRef}
+          muted
+          // A single clip has nothing to advance to, so it repeats itself.
+          loop={!advances}
+          playsInline
+          preload="auto"
+          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+        />
       </div>
+
+      {/* Above the clip while it changes over. An <img>, which the panel does
+          rotate correctly, so this works where a second <video> could not. */}
+      {current && (
+        <div
+          ref={posterBoxRef}
+          style={{
+            position: 'absolute', zIndex: 2,
+            opacity: covering ? 1 : 0,
+            // Appears at once and only fades away. Fading it in would be too
+            // late to cover anything: the swap itself takes about one frame,
+            // so a cover that eases in over 180ms never arrives.
+            transition: covering ? 'none' : 'opacity .18s ease',
+            pointerEvents: 'none',
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={posterVariantUrl(current)}
+            alt=""
+            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+          />
+        </div>
+      )}
     </div>
   )
 }

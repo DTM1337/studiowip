@@ -7,6 +7,8 @@ type Props = {
   src: string
   /** Degrees the display is rotated by. */
   rotation: number
+  /** When given, the clip plays once and this is called instead of looping. */
+  onEnded?: () => void
 }
 
 /**
@@ -23,9 +25,17 @@ type Props = {
  * back to the original plus a CSS rotation — correct in a desktop browser,
  * wrong on the TV, but better than not playing.
  */
-export default function RotatedVideoOverlay({ src, rotation }: Props) {
+export default function RotatedVideoOverlay({ src, rotation, onEnded }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
+
+  // Held in a ref so the effect below does not depend on its identity. A
+  // caller passing an inline arrow gave it a new one every render, tearing the
+  // listeners down and rebuilding them constantly — which also reset the
+  // buffering state and wiped the diagnostics each time.
+  const onEndedRef = useRef(onEnded)
+  onEndedRef.current = onEnded
+  const advances = !!onEnded
 
   // Only a quarter turn clockwise has a baked variant; anything else has to
   // fall back to transforming the element.
@@ -97,14 +107,19 @@ export default function RotatedVideoOverlay({ src, rotation }: Props) {
     const impatient = window.setTimeout(start, 4000)
 
     // Once running, a pause is something to recover from rather than wait out.
-    const resume = () => { if (started) video.play().catch(() => {}) }
+    // The pause that comes with reaching the end is not, or a playlist would
+    // restart the clip it is trying to advance past.
+    const resume = () => { if (started && !video.ended) video.play().catch(() => {}) }
     video.addEventListener('pause', resume)
+
+    const finish = () => onEndedRef.current?.()
+    if (advances) video.addEventListener('ended', finish)
 
     startWhenBuffered()
 
     const watchdog = window.setInterval(() => {
       if (stopped) return
-      if (started && video.paused) video.play().catch(() => {})
+      if (started && video.paused && !video.ended) video.play().catch(() => {})
       const r = box.getBoundingClientRect()
       document.documentElement.dataset.fsVideo =
         `src=${useVariant ? 'rot90' : 'original'} ready=${video.readyState}` +
@@ -125,9 +140,10 @@ export default function RotatedVideoOverlay({ src, rotation }: Props) {
       video.removeEventListener('progress', startWhenBuffered)
       video.removeEventListener('loadeddata', startWhenBuffered)
       video.removeEventListener('pause', resume)
+      video.removeEventListener('ended', finish)
       delete document.documentElement.dataset.fsVideo
     }
-  }, [playbackSrc, rotation, useVariant])
+  }, [playbackSrc, rotation, useVariant, advances])
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: '#000', overflow: 'hidden' }}>
@@ -137,7 +153,7 @@ export default function RotatedVideoOverlay({ src, rotation }: Props) {
           ref={videoRef}
           src={playbackSrc}
           muted
-          loop
+          loop={!advances}
           playsInline
           preload="auto"
           style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}

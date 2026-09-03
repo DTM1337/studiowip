@@ -24,6 +24,8 @@ export default function DisplayPage() {
   // param stays as a way to have it on from the first paint.
   const [showDebug, setShowDebug] = useState(false)
   const [hideCursor, setHideCursor] = useState(false)
+  const [playlist, setPlaylist] = useState<string[]>([])
+  const [playlistPos, setPlaylistPos] = useState<number | null>(null)
   const cmdLog = useRef({ total: 0, rotates: 0, last: '-', at: 0, recent: [] as string[] })
 
   useEffect(() => {
@@ -51,6 +53,7 @@ export default function DisplayPage() {
       const fs = document.documentElement.dataset.fsVideo
       setDebug([
         `rot=${rotation} cursor=${hideCursor ? 'hidden' : 'visible'} video=${vids}`,
+        `playlist=${playlist.length} pos=${playlistPos ?? '-'}`,
         ...(fs ? [`FS ${fs}`] : []),
         `cmds=${c.total} rotates=${c.rotates} last=${c.last} ${ago} ago subs=${subs}`,
         ...c.recent.map(r => `  ${r}`),
@@ -59,7 +62,15 @@ export default function DisplayPage() {
     tick()
     const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
-  }, [rotation, showDebug, hideCursor])
+  }, [rotation, showDebug, hideCursor, playlist, playlistPos])
+
+  const loadPlaylist = () => {
+    fetch('/api/playlist')
+      .then(r => r.json())
+      .then(d => setPlaylist(Array.isArray(d.ids) ? d.ids : []))
+      .catch(() => {})
+  }
+  useEffect(loadPlaylist, [])
 
   useEffect(() => {
     fetch('/api/posts')
@@ -103,6 +114,10 @@ export default function DisplayPage() {
         setShowDebug(d => !d)
       } else if (cmd.action === 'toggle-cursor') {
         setHideCursor(h => !h)
+      } else if (cmd.action === 'playlist-changed') {
+        loadPlaylist()
+      } else if (cmd.action === 'playlist-toggle') {
+        setPlaylistPos(p => p === null ? 0 : null)
       }
     }).subscribe()
     return () => { supabase.removeChannel(ch) }
@@ -188,12 +203,27 @@ export default function DisplayPage() {
   }, [rotation, showDebug, loading])
 
   const allPosts = livePosts.length ? livePosts : posts
-  const fullscreenPost = externalSelectedPostId
+
+  // Resolved against the live posts so a clip deleted since the list was saved
+  // is skipped rather than stalling the run.
+  const playlistPosts = playlist
+    .map(id => allPosts.find(p => p.id === id))
+    .filter((p): p is Post => !!p && p.file_type === 'video')
+
+  const playlistPost = playlistPos !== null && playlistPosts.length
+    ? playlistPosts[playlistPos % playlistPosts.length]
+    : null
+
+  const selectedPostObj = externalSelectedPostId
     ? allPosts.find(p => p.id === externalSelectedPostId) ?? null
     : null
-  // Only a rotated display needs the overlay; unrotated, the wall's own
-  // fullscreen view is already correct and cheaper.
-  const useVideoOverlay = rotation !== 0 && fullscreenPost?.file_type === 'video'
+
+  // The playlist takes the screen while it runs, over any single selection.
+  const fullscreenPost = playlistPost ?? selectedPostObj
+  // The overlay drives the playlist at any angle; for a single clip it is only
+  // needed when rotated, since unrotated the wall's own view is already right.
+  const useVideoOverlay = fullscreenPost?.file_type === 'video' &&
+    (playlistPost !== null || rotation !== 0)
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#efefef', display: 'flex',
@@ -240,7 +270,18 @@ export default function DisplayPage() {
           onPostsChange={setLivePosts} />
       </div>
       {useVideoOverlay && fullscreenPost && (
-        <RotatedVideoOverlay src={fullscreenPost.file_url} rotation={rotation} />
+        <RotatedVideoOverlay
+          // Remounts per clip, so each starts from a clean buffer rather than
+          // inheriting the previous one's state.
+          key={fullscreenPost.id}
+          src={fullscreenPost.file_url}
+          rotation={rotation}
+          // Wrapped rather than left to climb, so the position stays readable
+          // in the diagnostics on a screen that runs for weeks.
+          onEnded={playlistPost
+            ? () => setPlaylistPos(p => ((p ?? 0) + 1) % Math.max(1, playlistPosts.length))
+            : undefined}
+        />
       )}
     </>
   )

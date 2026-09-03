@@ -10,13 +10,38 @@ export default function GodMode() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [backfill, setBackfill] = useState<string | null>(null)
+  const [playlist, setPlaylist] = useState<string[]>([])
+  const [picking, setPicking] = useState(false)
+  const [playing, setPlaying] = useState(false)
   const throttle = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastScroll = useRef(0)
   const channel = useRef(supabase.channel(CHANNEL))
+  /**
+   * Saves the playlist, one request at a time.
+   *
+   * Picking several cards quickly used to fire overlapping saves, and whichever
+   * landed last won regardless of order — the list on screen and the one stored
+   * could disagree. Writes are serialised, and only the newest state is sent,
+   * so intermediate ones are skipped rather than queued.
+   */
+  const latestPlaylist = useRef<string[]>([])
+  const savingPlaylist = useRef(false)
+
 
   useEffect(() => {
     channel.current.subscribe()
     return () => { supabase.removeChannel(channel.current) }
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/playlist')
+      .then(r => r.json())
+      .then(d => {
+        const ids = Array.isArray(d.ids) ? d.ids : []
+        latestPlaylist.current = ids
+        setPlaylist(ids)
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -41,6 +66,45 @@ export default function GodMode() {
 
   const handleSelectPost = (postId: string | null) => {
     send({ action: 'select-post', postId })
+  }
+
+  // See latestPlaylist above for why this serialises.
+  const savePlaylist = async (ids: string[]) => {
+    latestPlaylist.current = ids
+    setPlaylist(ids)
+    if (savingPlaylist.current) return
+
+    savingPlaylist.current = true
+    try {
+      // Re-reads after each write, in case more picks arrived meanwhile.
+      let sent: string[] | null = null
+      while (sent !== latestPlaylist.current) {
+        sent = latestPlaylist.current
+        await fetch('/api/playlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: sent }),
+        }).catch(() => {})
+      }
+    } finally {
+      savingPlaylist.current = false
+    }
+    send({ action: 'playlist-changed' })
+  }
+
+  // Read from the ref, not the render closure: two clicks in quick succession
+  // would otherwise both start from the same list and the second undo the first.
+  const handleTogglePlaylist = (postId: string) => {
+    const current = latestPlaylist.current
+    savePlaylist(current.includes(postId)
+      ? current.filter(id => id !== postId)
+      : [...current, postId])
+  }
+
+  const handlePlayPlaylist = () => {
+    if (!playlist.length) return
+    setPlaying(p => !p)
+    send({ action: 'playlist-toggle' })
   }
 
   const handleRotate = () => send({ action: 'rotate' })
@@ -141,15 +205,44 @@ export default function GodMode() {
 
   return (
     <>
-      <CreativeWall initialPosts={posts} uploaderName="GodMode" onScrollChange={handleScrollChange} onSelectPost={handleSelectPost} />
+      <CreativeWall
+        initialPosts={posts}
+        uploaderName="GodMode"
+        onScrollChange={handleScrollChange}
+        onSelectPost={handleSelectPost}
+        playlistIds={playlist}
+        onTogglePlaylist={picking ? handleTogglePlaylist : undefined}
+      />
       <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
                     display: 'flex', gap: 10, alignItems: 'center' }}>
+        {picking && (
+          <span style={{ background: '#111', color: '#fff', borderRadius: 10,
+                         padding: '8px 12px', fontSize: 12, fontFamily: 'system-ui' }}>
+            Välj filmer · {playlist.length} valda
+          </span>
+        )}
         {backfill && (
           <span style={{ background: 'rgba(0,0,0,.8)', color: '#fff', borderRadius: 10,
                          padding: '8px 12px', fontSize: 12, fontFamily: 'system-ui' }}>
             {backfill}
           </span>
         )}
+        <button onClick={() => setPicking(p => !p)} title="Välj filmer till spellistan"
+          style={{ background: picking ? '#fff' : '#111', color: picking ? '#111' : '#fff',
+                   border: '1px solid #444', borderRadius: 12,
+                   padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
+          ☰
+        </button>
+        <button onClick={handlePlayPlaylist}
+          title={playlist.length ? 'Spela/stoppa spellistan på display' : 'Spellistan är tom'}
+          disabled={!playlist.length}
+          style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
+                   padding: '10px 16px', fontSize: 18,
+                   cursor: playlist.length ? 'pointer' : 'default',
+                   opacity: playlist.length ? 1 : .4,
+                   boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
+          {playing ? '⏹' : '⏵'}
+        </button>
         <button onClick={handleBackfill} title="Skapa roterade versioner av alla filmer (engångsjobb)"
           style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
                    padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>

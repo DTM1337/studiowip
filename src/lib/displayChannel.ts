@@ -10,6 +10,10 @@ export type DisplayCommand =
   | { action: 'toggle-canvas-video' }
   | { action: 'toggle-debug' }
   | { action: 'toggle-cursor' }
+  // The list itself is stored server-side; this only says it moved, so the
+  // display refetches rather than the list travelling through every keystroke.
+  | { action: 'playlist-changed' }
+  | { action: 'playlist-toggle' }
 
 export function sendCommand(cmd: DisplayCommand) {
   supabase.channel(CHANNEL).send({

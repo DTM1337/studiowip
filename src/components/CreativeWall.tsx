@@ -49,6 +49,15 @@ interface Props {
   /** Skip the fullscreen view for videos; something outside is drawing it. */
   suppressFullscreenVideo?: boolean
   /**
+   * Post ids in the playlist, in order. Their cards get a numbered marker.
+   */
+  playlistIds?: string[]
+  /**
+   * When given, clicking a card adds or removes it from the playlist instead
+   * of opening it. Only videos can be added.
+   */
+  onTogglePlaylist?: (postId: string) => void
+  /**
    * Reports the live post list. This component keeps the canonical one — it
    * subscribes to inserts — so anything outside that needs to look a post up
    * has to follow it, or it will miss everything uploaded since page load.
@@ -59,7 +68,7 @@ interface Props {
 export default function CreativeWall({
   initialPosts, uploaderName, displayMode = false,
   onScrollChange, externalScroll, onSelectPost, externalSelectedPostId,
-  suppressFullscreenVideo = false, onPostsChange,
+  suppressFullscreenVideo = false, onPostsChange, playlistIds, onTogglePlaylist,
 }: Props) {
   const [posts, setPosts]               = useState<Post[]>(initialPosts)
   const [selectedPost, setSelectedPost] = useState<Post | null>(null)
@@ -413,6 +422,11 @@ export default function CreativeWall({
   }
 
   const handleCardClick = (post: Post) => {
+    if (onTogglePlaylist) {
+      // Images have no end to advance on, so the playlist is videos only.
+      if (post.file_type === 'video') onTogglePlaylist(post.id)
+      return
+    }
     if (displayMode) setFocusedPost((prev) => prev?.id === post.id ? null : post)
     else setSelectedPost(post)
   }
@@ -480,7 +494,9 @@ export default function CreativeWall({
                 key={post.id}
                 post={post}
                 displayMode={displayMode}
-                    aspect={aspects[post.id]}
+                aspect={aspects[post.id]}
+                picking={!!onTogglePlaylist}
+                playlistIndex={playlistIds?.indexOf(post.id) ?? -1}
                 onClick={() => handleCardClick(post)}
               />
             ))}
@@ -666,16 +682,23 @@ interface CardProps {
   post: Post
   displayMode: boolean
   aspect?: number
+  /** Choosing playlist members rather than browsing. */
+  picking: boolean
+  /** Position in the playlist, or -1. */
+  playlistIndex: number
   onClick: () => void
 }
 
-function BoardCard({ post, displayMode, aspect, onClick }: CardProps) {
+function BoardCard({ post, displayMode, aspect, picking, playlistIndex, onClick }: CardProps) {
   const isVideo = post.file_type === 'video'
   const [posterFailed, setPosterFailed] = useState(false)
 
   return (
     <article
-      className={`wall-card ${displayMode ? 'display-mode' : ''}`}
+      className={`wall-card ${displayMode ? 'display-mode' : ''}` +
+        (playlistIndex >= 0 ? ' in-playlist' : '') +
+        // Dim what cannot be picked, so the choice is obvious.
+        (picking && !isVideo ? ' not-pickable' : '')}
       onClick={onClick}
     >
       <div
@@ -702,7 +725,8 @@ function BoardCard({ post, displayMode, aspect, onClick }: CardProps) {
                 onError={() => setPosterFailed(true)}
               />
         }
-        {isVideo && <span className="play-badge" aria-hidden="true">▶</span>}
+        {isVideo && playlistIndex < 0 && <span className="play-badge" aria-hidden="true">▶</span>}
+        {playlistIndex >= 0 && <span className="playlist-badge">{playlistIndex + 1}</span>}
         {/* Only the caption: the uploader's name is not shown on the board.
             Rendered at all only when there is a caption, so a card without one
             does not carry an empty gradient strip. */}
@@ -747,6 +771,18 @@ function BoardCard({ post, displayMode, aspect, onClick }: CardProps) {
         }
         .card-caption { font-size: 11px; color: rgba(255,255,255,.85); }
         /* The board shows a still, so a clip needs saying so. */
+        .wall-card.in-playlist {
+          outline: 3px solid #111; outline-offset: 2px;
+        }
+        .wall-card.not-pickable { opacity: .35; cursor: default; }
+        .playlist-badge {
+          position: absolute; top: 10px; right: 10px;
+          min-width: 26px; height: 26px; border-radius: 13px;
+          background: #111; color: #fff;
+          font: 700 12px/1 system-ui; font-variant-numeric: tabular-nums;
+          display: flex; align-items: center; justify-content: center;
+          padding: 0 7px; pointer-events: none;
+        }
         .play-badge {
           position: absolute; top: 10px; right: 10px;
           width: 26px; height: 26px; border-radius: 50%;

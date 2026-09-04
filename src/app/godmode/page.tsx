@@ -121,7 +121,7 @@ export default function GodMode() {
     if (!confirm(`Skapa roterade versioner för ${videos.length} filmer? Det tar en stund.`)) return
 
     const { rotatedVariantUrl, posterVariantUrl } = await import('@/lib/rotatedVariant')
-    const { mseVariantUrl } = await import('@/lib/mseVariant')
+    const { mseVariantUrl, MSE_WIDTH, MSE_HEIGHT } = await import('@/lib/mseVariant')
     const { rotateVideo90, makeMseVariant } = await import('@/lib/transcodeVideo')
     const { extractPoster } = await import('@/lib/videoPoster')
 
@@ -147,11 +147,23 @@ export default function GodMode() {
       setBackfill(`${i + 1}/${videos.length}…`)
       try {
         const rotUrl = rotatedVariantUrl(post.file_url)
-        const [rotOk, hasPoster, hasMse] = await Promise.all([
+        const [rotOk, hasPoster, mseOk] = await Promise.all([
           fetch(rotUrl, { method: 'HEAD' }).then(r => r.ok),
           fetch(posterVariantUrl(post.file_url), { method: 'HEAD' }).then(r => r.ok),
           fetch(mseVariantUrl(post.file_url), { method: 'HEAD' }).then(r => r.ok),
         ])
+
+        // A copy built to a different frame plays at the wrong size, so treat
+        // it as missing rather than leaving it in place.
+        const mseWrongSize = mseOk && await new Promise<boolean>(res => {
+          const probe = document.createElement('video')
+          probe.preload = 'metadata'
+          probe.onloadedmetadata = () =>
+            res(probe.videoWidth !== MSE_WIDTH || probe.videoHeight !== MSE_HEIGHT)
+          probe.onerror = () => res(false)
+          probe.src = mseVariantUrl(post.file_url)
+        })
+        const hasMse = mseOk && !mseWrongSize
 
         // An existing copy still needs redoing if it predates the resolution
         // cap: those clips are the ones that stutter on the panel.

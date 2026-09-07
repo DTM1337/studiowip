@@ -6,6 +6,7 @@ import RotatedVideoOverlay from '@/components/RotatedVideoOverlay'
 import SeamlessPlaylist from '@/components/SeamlessPlaylist'
 import Rulers from '@/components/Rulers'
 import { Post } from '@/types'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { CHANNEL } from '@/lib/displayChannel'
 
@@ -32,6 +33,11 @@ export default function DisplayPage() {
   // clip at a time rather than showing nothing.
   const [seamlessFailed, setSeamlessFailed] = useState(false)
   const cmdLog = useRef({ total: 0, rotates: 0, last: '-', at: 0, recent: [] as string[] })
+  // The real join status, not just whether a channel object exists. A dead
+  // subscription looks exactly like a working one from the outside: the panel
+  // sits there showing the last thing it was told, and every button press from
+  // GodMode goes nowhere.
+  const subStatus = useRef('...')
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('debug')) setShowDebug(true)
@@ -57,10 +63,13 @@ export default function DisplayPage() {
       const subs = supabase.getChannels().filter(ch => ch.topic.endsWith(CHANNEL)).length
       const fs = document.documentElement.dataset.fsVideo
       setDebug([
+        // First, because it is the line that says whether GodMode is reaching
+        // this panel at all — everything below is only meaningful if it is.
+        `link=${subStatus.current} cmds=${c.total} last=${c.last} ${ago} ago`,
         `rot=${rotation} cursor=${hideCursor ? 'hidden' : 'visible'} video=${vids}`,
         `playlist=${playlist.length} playing=${playlistPlaying}${seamlessFailed ? ' (utan mse)' : ''}`,
         ...(fs ? [`FS ${fs}`] : []),
-        `cmds=${c.total} rotates=${c.rotates} last=${c.last} ${ago} ago subs=${subs}`,
+        `rotates=${c.rotates} subs=${subs}`,
         ...c.recent.map(r => `  ${r}`),
       ])
     }
@@ -92,8 +101,26 @@ export default function DisplayPage() {
       .filter(c => c.topic.endsWith(CHANNEL))
       .forEach(c => { supabase.removeChannel(c) })
 
-    const ch = supabase.channel(CHANNEL)
-    ch.on('broadcast', { event: 'cmd' }, ({ payload }) => {
+    let ch: RealtimeChannel
+
+    const connect = () => {
+      ch = supabase.channel(CHANNEL)
+      wire(ch).subscribe(status => { subStatus.current = status })
+    }
+
+    // A dropped socket does not always come back on its own, and on the TV
+    // nobody is watching a console to notice: the panel keeps showing the wall
+    // while every command is silently lost. So the join is checked, and rebuilt
+    // from scratch if it has fallen over.
+    const watchdog = window.setInterval(() => {
+      if (['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT'].includes(subStatus.current)) {
+        subStatus.current = 'rejoining'
+        supabase.removeChannel(ch)
+        connect()
+      }
+    }, 5000)
+
+    const wire = (c: RealtimeChannel) => c.on('broadcast', { event: 'cmd' }, ({ payload }) => {
       const cmd = payload as { action: string; [key: string]: unknown }
       // Counted so the diagnostics can distinguish "commands really are
       // arriving" from "one press is being handled more than once".
@@ -126,8 +153,10 @@ export default function DisplayPage() {
       } else if (cmd.action === 'reload') {
         window.location.reload()
       }
-    }).subscribe()
-    return () => { supabase.removeChannel(ch) }
+    })
+
+    connect()
+    return () => { window.clearInterval(watchdog); supabase.removeChannel(ch) }
   }, [])
 
   // Rotation is applied to this wrapper rather than to <html>, so that the

@@ -249,9 +249,16 @@ export default function DisplayPage() {
       <style>{`
         nextjs-portal { display: none !important; }
         ${hideCursor ? `
-          /* !important and the universal selector because the wall sets its own
-             grab/grabbing cursors on the stage and cards. */
-          html, body, * { cursor: none !important; }
+          /* The universal selector because the wall sets its own cursors on the
+             board and cards, and !important to beat them.
+
+             A transparent 1x1 image before the keyword: some TV browsers draw
+             their pointer regardless of "none" but will honour a cursor image,
+             so this hides it in both. Browsers that take "none" use it, since
+             the image is only a fallback in the list order. */
+          html, body, * {
+            cursor: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=") 0 0, none !important;
+          }
         ` : ''}
       `}</style>
       {/* A sibling of the wrapper so it stays above the fullscreen overlay, but

@@ -123,6 +123,8 @@ export default function DisplayPage() {
         loadPlaylist()
       } else if (cmd.action === 'playlist-toggle') {
         setPlaylistPlaying(p => !p)
+      } else if (cmd.action === 'reload') {
+        window.location.reload()
       }
     }).subscribe()
     return () => { supabase.removeChannel(ch) }

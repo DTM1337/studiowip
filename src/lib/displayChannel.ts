@@ -14,6 +14,8 @@ export type DisplayCommand =
   // display refetches rather than the list travelling through every keystroke.
   | { action: 'playlist-changed' }
   | { action: 'playlist-toggle' }
+  // Saves walking over to the TV after a deploy.
+  | { action: 'reload' }
 
 export function sendCommand(cmd: DisplayCommand) {
   supabase.channel(CHANNEL).send({

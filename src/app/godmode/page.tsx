@@ -107,6 +107,10 @@ export default function GodMode() {
     send({ action: 'playlist-toggle' })
   }
 
+  const handleReload = () => {
+    if (confirm('Ladda om display?')) send({ action: 'reload' })
+  }
+
   const handleRotate = () => send({ action: 'rotate' })
   const handleToggleRulers = () => send({ action: 'toggle-rulers' })
   const handleToggleDebug = () => send({ action: 'toggle-debug' })
@@ -284,6 +288,11 @@ export default function GodMode() {
           style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
                    padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
           ⓘ
+        </button>
+        <button onClick={handleReload} title="Ladda om display"
+          style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
+                   padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
+          ⟲
         </button>
         <button onClick={handleRotate} title="Rotera display 90°"
           style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,

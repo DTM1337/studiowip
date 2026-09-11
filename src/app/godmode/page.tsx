@@ -28,10 +28,25 @@ export default function GodMode() {
   const savingPlaylist = useRef(false)
 
 
+  // What the display last reported about itself, and when — the only way to
+  // see from here whether a press actually landed on the TV.
+  const [tv, setTv] = useState<{
+    commit?: string; link?: string; cursorHidden?: boolean; rotation?: number
+    cmds?: number; last?: string; ua?: string; at: number
+  } | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+
   useEffect(() => {
-    channel.current.subscribe()
-    return () => { supabase.removeChannel(channel.current) }
+    channel.current
+      .on('broadcast', { event: 'status' }, ({ payload }) => setTv({ ...payload, at: Date.now() }))
+      .subscribe()
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => { window.clearInterval(id); supabase.removeChannel(channel.current) }
   }, [])
+
+  // The display reports every three seconds, so twice that without word means
+  // it is not hearing us either.
+  const tvAlive = tv !== null && now - tv.at < 8000
 
   useEffect(() => {
     fetch('/api/playlist')
@@ -275,7 +290,9 @@ export default function GodMode() {
           ⟳▤
         </button>
         <button onClick={handleToggleCursor} title="Visa/dölj muspekaren på display"
-          style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
+          // Lit by what the TV says, not by the press, so it shows the truth.
+          style={{ background: tv?.cursorHidden ? '#fff' : '#111', color: tv?.cursorHidden ? '#111' : '#fff',
+                   border: '1px solid #444', borderRadius: 12,
                    padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
           ⌖
         </button>
@@ -299,6 +316,21 @@ export default function GodMode() {
                    padding: '10px 16px', fontSize: 20, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
           ↻
         </button>
+      </div>
+      <div style={{ position: 'fixed', left: 16, bottom: 16, zIndex: 1000, maxWidth: '60vw',
+                    background: 'rgba(0,0,0,0.75)', color: tvAlive ? '#9f9' : '#f99',
+                    font: '12px/1.4 ui-monospace, monospace', padding: '6px 10px', borderRadius: 8 }}>
+        {tvAlive && tv ? (
+          <>
+            TV {tv.commit} · länk {tv.link} · pekare {tv.cursorHidden ? 'dold' : 'synlig'} · {tv.rotation}°
+            {' '}· {tv.cmds} kommandon, senast {tv.last}
+            <div style={{ color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {tv.ua}
+            </div>
+          </>
+        ) : (
+          <>TV svarar inte{tv ? ` (senast för ${Math.round((now - tv.at) / 1000)} s sedan)` : ''}</>
+        )}
       </div>
     </>
   )

@@ -38,6 +38,30 @@ export default function DisplayPage() {
   // sits there showing the last thing it was told, and every button press from
   // GodMode goes nowhere.
   const subStatus = useRef('...')
+  const chRef = useRef<RealtimeChannel | null>(null)
+
+  // Reports this panel's state back to GodMode, so it can be read from the
+  // phone doing the controlling instead of from a debug box across the room.
+  // Sent on every change and on a heartbeat, so GodMode can also tell a panel
+  // that has stopped answering from one that simply has nothing new to say.
+  useEffect(() => {
+    const report = () => chRef.current?.send({
+      type: 'broadcast',
+      event: 'status',
+      payload: {
+        commit: process.env.NEXT_PUBLIC_BUILD_COMMIT,
+        link: subStatus.current,
+        cursorHidden: hideCursor,
+        rotation,
+        cmds: cmdLog.current.total,
+        last: cmdLog.current.last,
+        ua: navigator.userAgent,
+      },
+    })
+    report()
+    const id = window.setInterval(report, 3000)
+    return () => window.clearInterval(id)
+  }, [hideCursor, rotation])
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('debug')) setShowDebug(true)
@@ -105,6 +129,7 @@ export default function DisplayPage() {
 
     const connect = () => {
       ch = supabase.channel(CHANNEL)
+      chRef.current = ch
       wire(ch).subscribe(status => { subStatus.current = status })
     }
 

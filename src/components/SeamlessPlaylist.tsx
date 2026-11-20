@@ -15,6 +15,17 @@ type Props = {
 const BUFFER_AHEAD_SECONDS = 30
 
 /**
+ * How much already-played video to keep behind the playhead.
+ *
+ * Everything older is dropped. Without this the buffer only ever grew — the
+ * panel played for a few seconds, reached about seven clips, and the TV browser
+ * killed the page for memory and reloaded it, which looked like the play button
+ * not working. Some margin is kept so a small seek backwards does not land
+ * outside the buffer.
+ */
+const KEEP_BEHIND_SECONDS = 8
+
+/**
  * Plays the playlist as one continuous stream.
  *
  * Changing a <video> element's source restarts the panel's hardware decoder,
@@ -59,6 +70,30 @@ export default function SeamlessPlaylist({ srcs, onUnsupported }: Props) {
       console.warn('MediaSource playback failed, falling back:', why)
       setFailed(true)
       onUnsupported()
+    }
+
+    /**
+     * Drops what has already been played, so memory stays bounded.
+     *
+     * Only between appends: a SourceBuffer takes one operation at a time, and
+     * removing during an append throws.
+     */
+    let dropped = 0
+    const evict = () => {
+      if (!sourceBuffer || appending || sourceBuffer.updating) return
+      if (mediaSource.readyState !== 'open') return
+
+      const buffered = sourceBuffer.buffered
+      if (!buffered.length) return
+      const cutoff = video.currentTime - KEEP_BEHIND_SECONDS
+      if (cutoff <= buffered.start(0)) return
+
+      try {
+        sourceBuffer.remove(buffered.start(0), cutoff)
+        dropped++
+      } catch {
+        // Losing a round of eviction is harmless; the next tick retries.
+      }
     }
 
     /** Appends one clip, then keeps going while the buffer is short. */
@@ -118,14 +153,18 @@ export default function SeamlessPlaylist({ srcs, onUnsupported }: Props) {
     const tick = window.setInterval(() => {
       if (stopped) return
       if (video.paused) video.play().catch(() => {})
+      evict()
       pump()
 
+      const buf = sourceBuffer?.buffered
       document.documentElement.dataset.fsVideo =
         `mse ready=${video.readyState} paused=${video.paused}` +
         ` t=${video.currentTime.toFixed(1)}` +
         ` fed=${feedIndex} of ${srcs.length}` +
-        ` buffered=${sourceBuffer?.buffered.length
-          ? sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1).toFixed(1) : 0}` +
+        // Both ends, since what matters is the span held in memory rather than
+        // how far the stream has run.
+        ` buf=${buf?.length ? `${buf.start(0).toFixed(0)}-${buf.end(buf.length - 1).toFixed(0)}` : '-'}` +
+        ` dropped=${dropped}` +
         ` state=${mediaSource.readyState}`
     }, 1000)
 

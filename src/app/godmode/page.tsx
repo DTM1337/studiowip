@@ -117,8 +117,29 @@ export default function GodMode() {
       : [...current, postId])
   }
 
+  /**
+   * The picks that still have a clip behind them.
+   *
+   * Deleting a post never touched the stored list, so its id stayed in there
+   * and kept being counted — the tally said seven while only the surviving
+   * few could be marked on the wall. Matched the way the display matches, so
+   * both agree on what the list actually is.
+   */
+  const livePlaylist = playlist.filter(id =>
+    posts.some(p => p.id === id && p.file_type === 'video'))
+
+  // Written back once the posts are known, so the stored file heals instead of
+  // collecting dead ids for ever. Guarded on having posts at all, so a failed
+  // or empty fetch cannot be read as "everything was deleted".
+  useEffect(() => {
+    if (loading || !posts.length) return
+    if (livePlaylist.length === playlist.length) return
+    savePlaylist(livePlaylist)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, posts, playlist])
+
   const handlePlayPlaylist = () => {
-    if (!playlist.length) return
+    if (!livePlaylist.length) return
     setPlaying(p => !p)
     send({ action: 'playlist-toggle' })
   }
@@ -252,7 +273,7 @@ export default function GodMode() {
         uploaderName="GodMode"
         onScrollChange={handleScrollChange}
         onSelectPost={handleSelectPost}
-        playlistIds={playlist}
+        playlistIds={livePlaylist}
         onTogglePlaylist={picking ? handleTogglePlaylist : undefined}
       />
       <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
@@ -260,7 +281,7 @@ export default function GodMode() {
         {picking && (
           <span style={{ background: '#111', color: '#fff', borderRadius: 10,
                          padding: '8px 12px', fontSize: 12, fontFamily: 'system-ui' }}>
-            Välj filmer · {playlist.length} valda
+            Välj filmer · {livePlaylist.length} valda
           </span>
         )}
         {backfill && (
@@ -276,12 +297,12 @@ export default function GodMode() {
           ☰
         </button>
         <button onClick={handlePlayPlaylist}
-          title={playlist.length ? 'Spela/stoppa spellistan på display' : 'Spellistan är tom'}
-          disabled={!playlist.length}
+          title={livePlaylist.length ? 'Spela/stoppa spellistan på display' : 'Spellistan är tom'}
+          disabled={!livePlaylist.length}
           style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 12,
                    padding: '10px 16px', fontSize: 18,
-                   cursor: playlist.length ? 'pointer' : 'default',
-                   opacity: playlist.length ? 1 : .4,
+                   cursor: livePlaylist.length ? 'pointer' : 'default',
+                   opacity: livePlaylist.length ? 1 : .4,
                    boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
           {playing ? '⏹' : '⏵'}
         </button>

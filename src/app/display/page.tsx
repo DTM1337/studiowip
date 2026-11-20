@@ -342,18 +342,13 @@ export default function DisplayPage() {
           /* The universal selector because the wall sets its own cursors on the
              board and cards, and !important to beat them.
 
-             Two declarations rather than one list, because a parser that
-             rejects any part of a declaration throws away all of it: as a
-             single "url(...), none" an engine that dislikes cursor images or
-             the hotspot syntax would be left with no rule at all — worse than
-             the keyword alone. Written apart, the keyword stands on its own and
-             the image only replaces it where it is understood. The image is
-             there because some TV browsers draw their pointer regardless of
-             "none" but will still honour a picture of one. */
+             The keyword alone, and nothing added to it. A transparent 1x1 image
+             was tried here as a belt-and-braces measure and was itself why the
+             pointer came back on the TV: being the later declaration it won
+             over "none", and the panel met an image it would not use with the
+             default arrow instead of the next fallback in the list. The plain
+             keyword is what has always worked on that screen. */
           html, body, * { cursor: none !important; }
-          html, body, * {
-            cursor: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=") 0 0, none !important;
-          }
         ` : ''}
       `}</style>
       {/* A sibling of the wrapper so it stays above the fullscreen overlay, but

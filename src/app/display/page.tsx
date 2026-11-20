@@ -50,6 +50,12 @@ export default function DisplayPage() {
   // actually over, nor that the pointer on screen is a pointer the document
   // knows about.
   const pointer = useRef({ moves: 0, x: -1, y: -1 })
+
+  // Identifies this panel among however many are open. Without it every
+  // display wrote over the others' status in GodMode, and a tab on a desk was
+  // indistinguishable from the wall — which made two readings during the
+  // cursor hunt ambiguous.
+  const displayId = useRef(Math.random().toString(36).slice(2, 8))
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       pointer.current.moves++
@@ -68,6 +74,7 @@ export default function DisplayPage() {
         type: 'broadcast',
         event: 'status',
         payload: {
+          id: displayId.current,
           commit: process.env.NEXT_PUBLIC_BUILD_COMMIT,
           link: subStatus.current,
           cursorHidden: hideCursor,
@@ -82,13 +89,21 @@ export default function DisplayPage() {
                 ? '.' + String(under.className).split(' ')[0] : ''}`
             : '-',
           underCursor: under ? getComputedStyle(under).cursor.slice(0, 20) : '-',
+          // Whether the run is on, how many picks reached this panel, and what
+          // the stream itself is doing — so a play press can be followed from
+          // the pressing end rather than inferred from a black screen.
+          playing: playlistPlaying,
+          picks: playlist.length,
+          videos: document.querySelectorAll('video').length,
+          seamlessFailed,
+          fs: document.documentElement.dataset.fsVideo ?? '-',
         },
       })
     }
     report()
     const id = window.setInterval(report, 3000)
     return () => window.clearInterval(id)
-  }, [hideCursor, rotation])
+  }, [hideCursor, rotation, playlistPlaying, playlist, seamlessFailed])
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('debug')) setShowDebug(true)

@@ -28,26 +28,49 @@ export default function GodMode() {
   const savingPlaylist = useRef(false)
 
 
-  // What the display last reported about itself, and when — the only way to
-  // see from here whether a press actually landed on the TV.
-  const [tv, setTv] = useState<{
-    commit?: string; link?: string; cursorHidden?: boolean; rotation?: number
-    cmds?: number; last?: string; ua?: string; at: number
+  /**
+   * What each display last reported about itself, keyed by the id it sends.
+   *
+   * Kept per display rather than as one value: a browser tab on a desk reports
+   * on the same channel as the wall, and when they overwrote each other it was
+   * impossible to tell which one a reading came from — the panel's user agent
+   * is what distinguishes them, so every one is listed.
+   */
+  type DisplayStatus = {
+    id?: string; commit?: string; link?: string; cursorHidden?: boolean
+    rotation?: number; cmds?: number; last?: string; ua?: string; at: number
     moves?: number; bodyCursor?: string; under?: string; underCursor?: string
-  } | null>(null)
+    playing?: boolean; picks?: number; videos?: number; seamlessFailed?: boolean
+    fs?: string
+  }
+  const [displays, setDisplays] = useState<Record<string, DisplayStatus>>({})
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     channel.current
-      .on('broadcast', { event: 'status' }, ({ payload }) => setTv({ ...payload, at: Date.now() }))
+      .on('broadcast', { event: 'status' }, ({ payload }) => {
+        const s = payload as DisplayStatus
+        setDisplays(prev => ({ ...prev, [s.id ?? 'okänd']: { ...s, at: Date.now() } }))
+      })
       .subscribe()
     const id = window.setInterval(() => setNow(Date.now()), 1000)
     return () => { window.clearInterval(id); supabase.removeChannel(channel.current) }
   }, [])
 
-  // The display reports every three seconds, so twice that without word means
-  // it is not hearing us either.
-  const tvAlive = tv !== null && now - tv.at < 8000
+  // Each reports every three seconds, so twice that without word means it is
+  // gone rather than merely quiet. Dropped from the list at that point, so a
+  // closed tab stops being shown as a live panel.
+  const liveDisplays = Object.values(displays)
+    .filter(d => now - d.at < 8000)
+    .sort((a, b) => (a.ua ?? '').localeCompare(b.ua ?? ''))
+
+  /** Samsung's panel is the one that matters; name it rather than its string. */
+  const describe = (ua = '') =>
+    /SMART-TV|Tizen/i.test(ua) ? 'TV' : /Macintosh|Mac OS/i.test(ua) ? 'Mac' : 'annan'
+
+  // The wall when it is on, otherwise whatever is listening, so the cursor
+  // button reflects the screen that matters rather than a tab on a desk.
+  const panel = liveDisplays.find(d => describe(d.ua) === 'TV') ?? liveDisplays[0]
 
   useEffect(() => {
     fetch('/api/playlist')
@@ -312,8 +335,8 @@ export default function GodMode() {
           ⟳▤
         </button>
         <button onClick={handleToggleCursor} title="Visa/dölj muspekaren på display"
-          // Lit by what the TV says, not by the press, so it shows the truth.
-          style={{ background: tv?.cursorHidden ? '#fff' : '#111', color: tv?.cursorHidden ? '#111' : '#fff',
+          // Lit by what the panel says, not by the press, so it shows the truth.
+          style={{ background: panel?.cursorHidden ? '#fff' : '#111', color: panel?.cursorHidden ? '#111' : '#fff',
                    border: '1px solid #444', borderRadius: 12,
                    padding: '10px 16px', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
           ⌖
@@ -339,23 +362,23 @@ export default function GodMode() {
           ↻
         </button>
       </div>
-      <div style={{ position: 'fixed', left: 16, bottom: 16, zIndex: 1000, maxWidth: '60vw',
-                    background: 'rgba(0,0,0,0.75)', color: tvAlive ? '#9f9' : '#f99',
-                    font: '12px/1.4 ui-monospace, monospace', padding: '6px 10px', borderRadius: 8 }}>
-        {tvAlive && tv ? (
-          <>
-            TV {tv.commit} · länk {tv.link} · pekare {tv.cursorHidden ? 'dold' : 'synlig'} · {tv.rotation}°
-            {' '}· {tv.cmds} kommandon, senast {tv.last}
-            <div style={{ color: '#aaa' }}>
-              pekarrörelser {tv.moves} · body {tv.bodyCursor} · under pekaren {tv.under} {tv.underCursor}
-            </div>
-            <div style={{ color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {tv.ua}
-            </div>
-          </>
-        ) : (
-          <>TV svarar inte{tv ? ` (senast för ${Math.round((now - tv.at) / 1000)} s sedan)` : ''}</>
+      <div style={{ position: 'fixed', left: 16, bottom: 16, zIndex: 1000, maxWidth: '62vw',
+                    background: 'rgba(0,0,0,0.75)', borderRadius: 8,
+                    font: '12px/1.5 ui-monospace, monospace', padding: '6px 10px' }}>
+        {liveDisplays.length === 0 && (
+          <div style={{ color: '#f99' }}>Ingen display svarar</div>
         )}
+        {liveDisplays.map(d => (
+          <div key={d.id} style={{ color: '#9f9' }}>
+            {describe(d.ua)} {d.commit} · {d.link} · {d.rotation}° · pekare{' '}
+            {d.cursorHidden ? 'dold' : 'synlig'} · {d.cmds} kmd, senast {d.last}
+            <div style={{ color: '#aaa' }}>
+              spellista {d.picks} · spelar {d.playing ? 'ja' : 'nej'} · video {d.videos}
+              {d.seamlessFailed ? ' · utan mse' : ''}
+              {d.fs && d.fs !== '-' ? ` · ${d.fs}` : ''}
+            </div>
+          </div>
+        ))}
       </div>
     </>
   )

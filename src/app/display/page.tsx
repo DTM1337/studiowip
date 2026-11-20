@@ -44,20 +44,47 @@ export default function DisplayPage() {
   // phone doing the controlling instead of from a debug box across the room.
   // Sent on every change and on a heartbeat, so GodMode can also tell a panel
   // that has stopped answering from one that simply has nothing new to say.
+  // Where the panel last saw a pointer, and whether it reports one at all.
+  // Checked from here because the state flipping proves only that the rule was
+  // written — not that this engine computes "none" for whatever the pointer is
+  // actually over, nor that the pointer on screen is a pointer the document
+  // knows about.
+  const pointer = useRef({ moves: 0, x: -1, y: -1 })
   useEffect(() => {
-    const report = () => chRef.current?.send({
-      type: 'broadcast',
-      event: 'status',
-      payload: {
-        commit: process.env.NEXT_PUBLIC_BUILD_COMMIT,
-        link: subStatus.current,
-        cursorHidden: hideCursor,
-        rotation,
-        cmds: cmdLog.current.total,
-        last: cmdLog.current.last,
-        ua: navigator.userAgent,
-      },
-    })
+    const onMove = (e: MouseEvent) => {
+      pointer.current.moves++
+      pointer.current.x = e.clientX
+      pointer.current.y = e.clientY
+    }
+    window.addEventListener('mousemove', onMove, true)
+    return () => window.removeEventListener('mousemove', onMove, true)
+  }, [])
+
+  useEffect(() => {
+    const report = () => {
+      const p = pointer.current
+      const under = p.x >= 0 ? document.elementFromPoint(p.x, p.y) : null
+      chRef.current?.send({
+        type: 'broadcast',
+        event: 'status',
+        payload: {
+          commit: process.env.NEXT_PUBLIC_BUILD_COMMIT,
+          link: subStatus.current,
+          cursorHidden: hideCursor,
+          rotation,
+          cmds: cmdLog.current.total,
+          last: cmdLog.current.last,
+          ua: navigator.userAgent,
+          moves: p.moves,
+          bodyCursor: getComputedStyle(document.body).cursor.slice(0, 20),
+          under: under
+            ? `${under.tagName.toLowerCase()}${under.className
+                ? '.' + String(under.className).split(' ')[0] : ''}`
+            : '-',
+          underCursor: under ? getComputedStyle(under).cursor.slice(0, 20) : '-',
+        },
+      })
+    }
     report()
     const id = window.setInterval(report, 3000)
     return () => window.clearInterval(id)

@@ -33,6 +33,7 @@ export default function GodMode() {
   const [tv, setTv] = useState<{
     commit?: string; link?: string; cursorHidden?: boolean; rotation?: number
     cmds?: number; last?: string; ua?: string; at: number
+    moves?: number; bodyCursor?: string; under?: string; underCursor?: string
   } | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
@@ -324,7 +325,10 @@ export default function GodMode() {
           <>
             TV {tv.commit} · länk {tv.link} · pekare {tv.cursorHidden ? 'dold' : 'synlig'} · {tv.rotation}°
             {' '}· {tv.cmds} kommandon, senast {tv.last}
-            <div style={{ color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div style={{ color: '#aaa' }}>
+              pekarrörelser {tv.moves} · body {tv.bodyCursor} · under pekaren {tv.under} {tv.underCursor}
+            </div>
+            <div style={{ color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {tv.ua}
             </div>
           </>

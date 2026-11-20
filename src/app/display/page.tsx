@@ -70,11 +70,20 @@ export default function DisplayPage() {
     // behaviour that only applies while rotated.
     const saved = Number(localStorage.getItem('display-rotation'))
     if ([90, 180, 270].includes(saved)) setRotation(saved)
+    // Kept for the same reason as the angle: the reload button means the panel
+    // restarts often, and having the pointer reappear every time — needing a
+    // walk to the TV or another press — is exactly what these controls exist to
+    // avoid.
+    if (localStorage.getItem('display-hide-cursor') === '1') setHideCursor(true)
   }, [])
 
   useEffect(() => {
     localStorage.setItem('display-rotation', String(rotation))
   }, [rotation])
+
+  useEffect(() => {
+    localStorage.setItem('display-hide-cursor', hideCursor ? '1' : '0')
+  }, [hideCursor])
 
   // Reports what each video is actually doing on the TV, which cannot be
   // inspected any other way.
@@ -306,10 +315,15 @@ export default function DisplayPage() {
           /* The universal selector because the wall sets its own cursors on the
              board and cards, and !important to beat them.
 
-             A transparent 1x1 image before the keyword: some TV browsers draw
-             their pointer regardless of "none" but will honour a cursor image,
-             so this hides it in both. Browsers that take "none" use it, since
-             the image is only a fallback in the list order. */
+             Two declarations rather than one list, because a parser that
+             rejects any part of a declaration throws away all of it: as a
+             single "url(...), none" an engine that dislikes cursor images or
+             the hotspot syntax would be left with no rule at all — worse than
+             the keyword alone. Written apart, the keyword stands on its own and
+             the image only replaces it where it is understood. The image is
+             there because some TV browsers draw their pointer regardless of
+             "none" but will still honour a picture of one. */
+          html, body, * { cursor: none !important; }
           html, body, * {
             cursor: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=") 0 0, none !important;
           }

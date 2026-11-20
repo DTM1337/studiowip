@@ -134,7 +134,14 @@ export default function GodMode() {
   // Read from the ref, not the render closure: two clicks in quick succession
   // would otherwise both start from the same list and the second undo the first.
   const handleTogglePlaylist = (postId: string) => {
-    const current = latestPlaylist.current
+    // Ids for deleted posts are dropped here, on a change the user asked for,
+    // rather than silently on load — and only when the posts are actually
+    // known, so an unloaded list cannot be mistaken for an empty wall.
+    const current = posts.length
+      ? latestPlaylist.current.filter(id =>
+          posts.some(p => p.id === id && p.file_type === 'video'))
+      : latestPlaylist.current
+
     savePlaylist(current.includes(postId)
       ? current.filter(id => id !== postId)
       : [...current, postId])
@@ -151,15 +158,12 @@ export default function GodMode() {
   const livePlaylist = playlist.filter(id =>
     posts.some(p => p.id === id && p.file_type === 'video'))
 
-  // Written back once the posts are known, so the stored file heals instead of
-  // collecting dead ids for ever. Guarded on having posts at all, so a failed
-  // or empty fetch cannot be read as "everything was deleted".
-  useEffect(() => {
-    if (loading || !posts.length) return
-    if (livePlaylist.length === playlist.length) return
-    savePlaylist(livePlaylist)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, posts, playlist])
+  // Deliberately not written back on its own. Pruning automatically meant a
+  // page load could rewrite the stored list with no one asking, and if the
+  // posts ever came back short — a partial response, a changed endpoint — that
+  // write would delete picks that were perfectly good. Nothing here is worth
+  // destroying a list the user assembled by hand, so dead ids are only dropped
+  // as a side effect of a pick the user actually makes, below.
 
   const handlePlayPlaylist = () => {
     if (!livePlaylist.length) return
